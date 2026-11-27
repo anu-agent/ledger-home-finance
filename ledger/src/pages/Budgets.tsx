@@ -1,11 +1,11 @@
 import { CatIcon, EmojiPick } from '../icons';
-import { useState } from 'react';
-import { api, forgetLoaded, money, useData } from '../lib';
-import { Fold, Meter, More, Skeleton } from '../ui';
+import { useEffect, useState } from 'react';
+import { api, forgetLoaded, money, monthLong, useData } from '../lib';
+import { Fold, Meter, Modal, More, Skeleton } from '../ui';
 import { BudgetSuggest } from './Setup';
 import { ZeroGuide } from './ZeroGuide';
 
-function BudgetInput({ cat, onSaved, month }: { cat: any; onSaved: () => void; month?: string }) {
+function BudgetInput({ cat, onSaved, month, plan }: { cat: any; onSaved: () => void; month?: string; plan?: boolean }) {
   const typed = cat.base ?? cat.budget;   // the monthly amount as typed; cat.budget also counts what was carried over
   const [value, setValue] = useState(String(typed));
   const [err, setErr] = useState('');
@@ -17,6 +17,8 @@ function BudgetInput({ cat, onSaved, month }: { cat: any; onSaved: () => void; m
     try {
       // In the zero-based mode the box is what this category is given this month, not a standing amount.
       if (cat.zero && month) await api('/api/zero/assign', { method: 'PUT', body: { month, category_id: cat.id, amount: n } });
+      // For a month that hasn't begun, the amount is kept for that month and this month is left alone.
+      else if (plan && month) await api('/api/budget-plan', { method: 'PUT', body: { month, category_id: cat.id, amount: n } });
       else await api(`/api/categories/${cat.id}`, { method: 'PATCH', body: { budget: n } });
       onSaved();
     } catch (e: any) {
@@ -119,10 +121,114 @@ function ZeroSwitch({ z, onChanged }: { z: any; onChanged: () => void }) {
   );
 }
 
-export default function Budgets({ month }: { month: string }) {
+const PROTECTED = ['Other', 'Income', 'Transfer'];
+
+/**
+ * "Organise" for one category: which list it sits in (flexible, fixed, or a group of the household's own),
+ * merging it into another, or hiding it. One window, so a row keeps a short line of links.
+ */
+function Organise({ cat, own, cats, onClose, onDone, onRemove }: { cat: any; own: any[]; cats: any[]; onClose: () => void; onDone: (note: string) => void; onRemove: () => void }) {
+  const inOwn = cat.group_id && own.some((g) => g.id === cat.group_id);
+  const [list, setList] = useState(inOwn ? String(cat.group_id) : cat.fixed ? 'fixed' : 'flex');
+  const [fixed, setFixed] = useState(!!cat.fixed);
+  const [name, setName] = useState('');
+  const others = cats.filter((c) => c.id !== cat.id && !c.hidden);
+  const [into, setInto] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const keep = !PROTECTED.includes(cat.name);
+  const run = async (what: () => Promise<string>) => {
+    setBusy(true); setErr('');
+    try { onDone(await what()); } catch (e: any) { setErr(e.message); setBusy(false); }
+  };
+  const place = () => run(async () => {
+    let to = list;
+    if (list === 'new') {
+      if (!name.trim()) throw new Error('Give the new group a name.');
+      to = String((await api('/api/category-groups', { method: 'POST', body: { name } })).id);
+    }
+    await api(`/api/categories/${cat.id}/place`, { method: 'POST', body: { list: to, fixed } });
+    return `${cat.name} moved.`;
+  });
+  const merge = () => run(async () => {
+    if (!into) throw new Error('Choose the category to merge it into.');
+    const target = others.find((c) => String(c.id) === into);
+    if (!confirm(`Merge "${cat.name}" into "${target?.name}"? Everything filed in ${cat.name} moves there and ${cat.name} is removed. This can't be undone.`)) throw new Error('');
+    const r = await api(`/api/categories/${cat.id}/merge`, { method: 'POST', body: { into: Number(into) } });
+    return `${cat.name} merged into ${r.to}: ${r.moved} transaction${r.moved === 1 ? '' : 's'} moved.`;
+  });
+  const aside = () => run(async () => {
+    await api(`/api/categories/${cat.id}/aside`, { method: 'POST', body: { on: true } });
+    return `${cat.name} no longer counts in your budget. It is listed under "Not counted in the budget" on this page.`;
+  });
+  const hide = () => run(async () => {
+    await api(`/api/categories/${cat.id}/hide`, { method: 'POST', body: { on: true } });
+    return `${cat.name} is hidden. It is listed at the foot of this page if you want it back.`;
+  });
+  const grouped = list !== 'flex' && list !== 'fixed';
+  return (
+    <Modal title={`Organise ${cat.name}`} onClose={onClose}>
+      <div className="organise">
+        {keep && <>
+          <h3>Its name and icon</h3>
+          <div className="add-actions"><button onClick={() => { onClose(); dispatchEvent(new CustomEvent('ledger-icon-edit', { detail: { id: cat.id, name: cat.name, icon: cat.icon } })); }}>Rename or change the icon</button></div>
+        </>}
+        <h3>Where it sits</h3>
+        <div className="add-grid">
+          <label>List
+            <select value={list} data-go="cat-list" onChange={(e) => { setList(e.target.value); setErr(''); }}>
+              <option value="flex">Flexible spending</option>
+              <option value="fixed">Fixed bills</option>
+              {own.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+              <option value="new">＋ A new group of your own…</option>
+            </select>
+          </label>
+          {list === 'new' && <label>Name of the group<input type="text" value={name} maxLength={40} placeholder="Giving" autoFocus onChange={(e) => { setName(e.target.value); setErr(''); }} /></label>}
+        </div>
+        {grouped && <label className="row check"><span className="grow">It is a fixed bill<small>About the same every month, such as rent or insurance. Ledger leaves fixed bills out when it judges your day-to-day pace.</small></span><input type="checkbox" checked={fixed} onChange={(e) => setFixed(e.target.checked)} /></label>}
+        <div className="add-actions"><button className="primary" disabled={busy} onClick={place}>Save</button></div>
+        {keep && <>
+          <h3>Merge it into another category</h3>
+          <p className="sub">Everything filed in {cat.name}, its bills and the shops Ledger has learned to file there all move to the category you choose, and {cat.name} is removed. The other category keeps its own budget.</p>
+          <div className="add-actions">
+            <select value={into} aria-label={`Category to merge ${cat.name} into`} onChange={(e) => { setInto(e.target.value); setErr(''); }}>
+              <option value="">Choose a category</option>
+              {others.map((c) => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
+            </select>
+            <button disabled={busy || !into} onClick={merge}>Merge</button>
+          </div>
+          <h3>Leave it out of the budget</h3>
+          <p className="sub">For spending that isn't really yours, such as work expenses you are paid back for. What you file in {cat.name} then counts in no budget, total or report, and its budget goes to 0. File the money that comes back there too and this page shows both sides. You can still choose it in every category menu.</p>
+          <div className="add-actions"><button disabled={busy} data-go="cat-aside" onClick={aside}>Don't count {cat.name}</button></div>
+          <h3>Hide it</h3>
+          <p className="sub">For a category you no longer use. It leaves this page and every category menu, and its budget goes to 0. Nothing filed in it changes, and its past stays in your totals and reports.</p>
+          <div className="add-actions"><button disabled={busy} onClick={hide}>Hide {cat.name}</button></div>
+          <h3>Remove it</h3>
+          <p className="sub">Removing throws its history away: everything filed in {cat.name} is moved to Other and can't be told apart afterwards. <b>To keep the history, use Merge or Hide above.</b> Remove suits a category made by mistake or never used.</p>
+          <div className="add-actions"><button className="danger" disabled={busy} onClick={() => { onClose(); onRemove(); }}>Remove {cat.name}</button></div>
+        </>}
+        {err && <p className="error">{err}</p>}
+      </div>
+    </Modal>
+  );
+}
+
+const thisMonth = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+const monthAfter = (m: string) => { const [y, mo] = m.split('-').map(Number); return mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, '0')}`; };
+const nameOf = (m: string) => monthLong(m).split(' ')[0];
+
+export default function Budgets({ month: chosen }: { month: string }) {
+  // "Plan next month" looks one month ahead on this page only; the rest of the app stays on the month chosen.
+  const [ahead, setAhead] = useState(false);
+  const now = thisMonth(), coming = monthAfter(now);
+  useEffect(() => { if (chosen !== now) setAhead(false); }, [chosen, now]);
+  const planning = ahead && chosen === now;
+  const month = planning ? coming : chosen;
   const { data: s, error, reload: reloadSummary } = useData(`/api/summary?month=${month}`);
   const { data: z, reload: reloadZero } = useData<any>(`/api/zero?month=${month}`);
-  const reload = () => { reloadSummary(); reloadZero(); };
+  const { data: own, reload: reloadGroups } = useData<any[]>('/api/category-groups');
+  const reload = () => { reloadSummary(); reloadZero(); reloadGroups(); };
+  const [organising, setOrganising] = useState<any>(null);
   // (Before the early returns below: hooks must run in the same order on every draw.)
   const [note, setNote] = useState('');
   if (error) return <p className="error">{error}</p>;
@@ -130,7 +236,7 @@ export default function Budgets({ month }: { month: string }) {
   const suggest = <section className="card"><div className="card-head"><h2>Suggested budgets</h2></div><p className="sub first">Ledger can suggest an amount for each category from what you've really spent over the last few months, or from your take-home pay if it hasn't seen a full month yet. You check them before anything changes.</p><BudgetSuggest onApplied={reload} /></section>;
   // Removing a category moves whatever was filed in it to Other, so nothing is lost.
   const removeCategory = async (c: any) => {
-    if (!confirm(`Remove the category "${c.name}"? Anything filed in it moves to Other. This can't be undone.`)) return;
+    if (!confirm(`Remove "${c.name}"? Everything filed in it moves to Other and its history is lost. (Merge or Hide would keep it.) This can't be undone.`)) return;
     try {
       const r = await api(`/api/categories/${c.id}`, { method: 'DELETE' });
       setNote(`${c.name} removed.${r.moved ? ` ${r.moved} transaction${r.moved === 1 ? '' : 's'} moved to ${r.to}.` : ''}`);
@@ -145,10 +251,39 @@ export default function Budgets({ month }: { month: string }) {
       forgetLoaded(); reload();
     } catch (e: any) { setNote(e.message); }
   };
-  const groups = [
-    { title: 'Flexible spending', items: s.categories.filter((c: any) => !c.fixed) },
-    { title: 'Fixed bills', items: s.categories.filter((c: any) => c.fixed) },
-  ];
+  // One place up or down within its own list. The order is the household's, and every menu follows it.
+  const move = async (c: any, dir: 'up' | 'down') => {
+    try { await api(`/api/categories/${c.id}/move`, { method: 'POST', body: { dir } }); setNote(''); forgetLoaded(); reload(); dispatchEvent(new Event('ledger-refresh')); }
+    catch (e: any) { setNote(e.message); }
+  };
+  // A hidden category is left off the page unless something was spent in it this month.
+  const myGroups = own ?? [];
+  const inOwn = (c: any) => c.group_id && myGroups.some((g) => g.id === c.group_id);
+  const visible = s.categories.filter((c: any) => !c.hidden || c.spent > 0.005);
+  const tucked = s.categories.filter((c: any) => c.hidden);
+  const groups = ([
+    ...myGroups.map((g) => ({ id: g.id, title: g.name, items: visible.filter((c: any) => c.group_id === g.id) })),
+    { title: 'Flexible spending', items: visible.filter((c: any) => !inOwn(c) && !c.fixed) },
+    { title: 'Fixed bills', items: visible.filter((c: any) => !inOwn(c) && c.fixed) },
+  ] as { id?: number; title: string; items: any[] }[]).filter((g) => g.id || g.items.length);
+  const changed = () => { forgetLoaded(); reload(); dispatchEvent(new Event('ledger-refresh')); };
+  const countAgain = async (c: any) => { try { await api(`/api/categories/${c.id}/aside`, { method: 'POST', body: { on: false } }); setNote(`${c.name} counts in your budget again. Give it a budget if it needs one.`); changed(); } catch (e: any) { setNote(e.message); } };
+  const unhide = async (c: any) => { try { await api(`/api/categories/${c.id}/hide`, { method: 'POST', body: { on: false } }); setNote(`${c.name} is back.`); changed(); } catch (e: any) { setNote(e.message); } };
+  const newGroup = async () => {
+    const name = prompt('Name of the new group (for example Giving, Food or Kids):');
+    if (!name?.trim()) return;
+    try { await api('/api/category-groups', { method: 'POST', body: { name } }); setNote(`${name.trim()} added. Use Organise beside a category to put it there.`); changed(); } catch (e: any) { setNote(e.message); }
+  };
+  const renameGroup = async (g: any) => {
+    const name = prompt('Name of the group:', g.title);
+    if (!name?.trim() || name.trim() === g.title) return;
+    try { await api(`/api/category-groups/${g.id}`, { method: 'PATCH', body: { name } }); changed(); } catch (e: any) { setNote(e.message); }
+  };
+  const moveGroup = async (g: any, dir: 'up' | 'down') => { try { await api(`/api/category-groups/${g.id}/move`, { method: 'POST', body: { dir } }); changed(); } catch (e: any) { setNote(e.message); } };
+  const removeGroup = async (g: any) => {
+    if (!confirm(`Remove the group "${g.title}"? Only the heading goes: its categories move back under Flexible spending or Fixed bills.`)) return;
+    try { await api(`/api/category-groups/${g.id}`, { method: 'DELETE' }); changed(); } catch (e: any) { setNote(e.message); }
+  };
   const left = s.budget - s.spent;
   const zeroNow = !!z?.on && !z.before;
   // Covering an overspent category by moving what the page suggests (zero-based mode only).
@@ -190,6 +325,17 @@ export default function Budgets({ month }: { month: string }) {
   return (
     <div className="stack">
       {note && <p className="sub" role="status">{note}</p>}
+      {planning ? (
+        <section className="card plan-ahead" data-go="plan-ahead-on">
+          <div className="card-head"><h2>Planning {monthLong(coming)}</h2><button className="link" onClick={() => setAhead(false)}>Back to {nameOf(now)}</button></div>
+          {zeroNow
+            ? <p className="sub first">You are handing out money for {nameOf(coming)}. "To be assigned" is what you have left today, so anything beyond it is waiting on {nameOf(coming)}'s income. {nameOf(now)}'s amounts are not changed.</p>
+            : <p className="sub first">Amounts you type here start on {nameOf(coming)} 1 and stay until you change them. {nameOf(now)}'s budget is not touched. A category you leave alone keeps the amount it has now.</p>}
+          {!zeroNow && s.categories.some((c: any) => c.planned) && <p style={{ margin: 0 }}><button className="link" onClick={async () => { try { await api(`/api/budget-plan?month=${coming}`, { method: 'DELETE' }); forgetLoaded(); reload(); } catch (e: any) { setNote(e.message); } }}>Start {nameOf(coming)} over from {nameOf(now)}'s amounts</button></p>}
+        </section>
+      ) : chosen === now ? (
+        <p className="plan-ahead-offer"><button data-go="plan-ahead" onClick={() => setAhead(true)}>Plan {nameOf(coming)}'s budget</button><small>Work on next month before it starts, without changing this one.</small></p>
+      ) : null}
       {z?.on && <ZeroBar z={z} month={month} onChanged={reload} />}
       <section className="tiles">
         <div className="tile"><div className="label">Budget</div><div className="value">{money(s.budget)}</div><div className="sub">{zeroNow ? 'in your categories this month' : s.categories.some((c: any) => c.rollover && Math.abs(c.carry) >= 0.005) ? 'this month, with what was carried over' : 'per month'}</div></div>
@@ -220,38 +366,76 @@ export default function Budgets({ month }: { month: string }) {
       )}
       <section className="card">
         {zeroNow ? <p className="sub" style={{ margin: 0 }}>The box on the right is what each category is given <b>this month</b>. It saves when you leave the field. Each bar shows what the category has to spend: this month's amount plus whatever it had left from before.</p> : <p className="sub" style={{ margin: 0 }}>Change a monthly amount on the right. It saves when you leave the field. <b>Carry over</b> moves whatever is left at the end of a month into the next one, which suits things you save up for, such as clothing, gifts or car repairs.</p>}
-        {groups.map((g) => (
-          <div key={g.title}>
+        <p className="sub" style={{ margin: '6px 0 0' }}>{'The arrows (or "⋯" on a phone) move a category up or down. '}<b>Organise</b>{' does the rest: rename, regroup, merge, hide, leave out of the budget, or remove. '}<button className="link" data-go="cat-group" onClick={newGroup}>Make a group of your own</button></p>
+        {groups.map((g, gi) => (
+          <div key={g.id ? `g${g.id}` : g.title}>
             <div className="group-head">
-              <span>{g.title}</span>
+              <span>{g.title}{g.id ? <span className="group-acts">
+                <span className="wide-only"><button className="link" disabled={gi === 0} aria-label={`Move the group ${g.title} up`} onClick={() => moveGroup(g, 'up')}>↑</button><button className="link" disabled={gi >= myGroups.length - 1} aria-label={`Move the group ${g.title} down`} onClick={() => moveGroup(g, 'down')}>↓</button><button className="link" onClick={() => renameGroup(g)}>Rename</button><button className="link" onClick={() => removeGroup(g)}>Remove</button></span>
+                <More name={g.title} sub="A group of your own" items={() => [
+                  gi > 0 && { label: 'Move up', run: () => moveGroup(g, 'up') },
+                  gi < myGroups.length - 1 && { label: 'Move down', run: () => moveGroup(g, 'down') },
+                  { label: 'Rename', run: () => renameGroup(g) },
+                  { label: 'Remove the group', danger: true, hint: 'Its categories go back under Flexible or Fixed', run: () => removeGroup(g) },
+                ]} />
+              </span> : null}</span>
               <span className="num">{money(g.items.reduce((a: number, c: any) => a + c.spent, 0))} / {money(g.items.reduce((a: number, c: any) => a + c.budget, 0))}</span>
             </div>
-            {g.items.map((c: any) => (
+            {g.id && !g.items.length ? <p className="sub group-empty">Nothing here yet. Use Organise beside a category to put it in this group.</p> : null}
+            {g.items.map((c: any, i: number) => (
               <div key={c.id} className="budget-row">
                 <div>
                   <Meter id={c.id} icon={c.icon} name={c.name} spent={c.spent} budget={c.budget} />
+                  {c.hidden ? <small className="carry-note">Hidden, but something was spent in it this month. <button className="link" onClick={() => unhide(c)}>Show it again</button></small> : null}
                   {c.zero && Math.abs(c.carry) >= 0.005 && <small className="carry-note">{c.carry > 0 ? <>{money(c.base)} this month, plus <b className="good">{money(c.carry)}</b> left from before</> : <>{money(c.base)} this month, less <b className="bad">{money(-c.carry)}</b> overspent before</>}</small>}
                   {c.rollover && <small className="carry-note">{Math.abs(c.carry) < 0.005 ? "Carries over: what's left this month moves to next month." : c.carry > 0 ? <>{money(c.base)} a month, plus <b className="good">{money(c.carry)}</b> carried over</> : <>{money(c.base)} a month, less <b className="bad">{money(-c.carry)}</b> overspent before</>}</small>}
                 </div>
-                <BudgetInput key={`${c.id}-${month}-${c.zero ? c.base : 'set'}`} cat={c} month={month} onSaved={reload} />
+                <BudgetInput key={`${c.id}-${month}-${c.base ?? c.budget}`} cat={c} month={month} plan={planning} onSaved={() => { forgetLoaded(); reload(); }} />
                 <More name={c.name} sub={`${money(c.spent)} spent of ${money(c.budget)}`} items={() => [
                   !c.zero && { label: c.rollover ? 'Stop carrying over' : 'Carry over', hint: c.rollover ? 'The same budget every month again' : "What's left moves into next month", run: () => carry(c) },
-                  !['Other', 'Income', 'Transfer'].includes(c.name) && { label: 'Rename or change the icon', run: () => dispatchEvent(new CustomEvent('ledger-icon-edit', { detail: { id: c.id, name: c.name, icon: c.icon } })) },
-                  !['Other', 'Income', 'Transfer'].includes(c.name) && { label: 'Remove', danger: true, hint: 'Anything filed in it moves to Other', run: () => removeCategory(c) },
+                  i > 0 && { label: 'Move up', hint: 'One place higher in this list and in every category menu', run: () => move(c, 'up') },
+                  i < g.items.length - 1 && { label: 'Move down', hint: 'One place lower', run: () => move(c, 'down') },
+                  { label: 'Organise', hint: 'Rename it, change its group, merge, hide or remove it', run: () => setOrganising(c) },
                 ]} />
                 <div className="budget-acts wide-only">
+                <span className="budget-move" data-go="cat-move">
+                  <button className="link budget-remove" disabled={i === 0} aria-label={`Move ${c.name} up`} title="Move up" onClick={() => move(c, 'up')}>↑</button>
+                  <button className="link budget-remove" disabled={i === g.items.length - 1} aria-label={`Move ${c.name} down`} title="Move down" onClick={() => move(c, 'down')}>↓</button>
+                </span>
                 {!c.zero && <button className="link budget-remove" aria-pressed={!!c.rollover} aria-label={`${c.rollover ? 'Stop carrying over' : 'Carry over'} what is left of ${c.name}`} onClick={() => carry(c)}>{c.rollover ? 'Stop carrying over' : 'Carry over'}</button>}
-                {!['Other', 'Income', 'Transfer'].includes(c.name) && <button className="link budget-remove" aria-label={`Rename the category ${c.name}`} onClick={() => dispatchEvent(new CustomEvent('ledger-icon-edit', { detail: { id: c.id, name: c.name, icon: c.icon } }))}>Rename</button>}
-                {!['Other', 'Income', 'Transfer'].includes(c.name) && <button className="link budget-remove" aria-label={`Remove the category ${c.name}`} onClick={() => removeCategory(c)}>Remove</button>}
+                <button className="link budget-remove" data-go="cat-organise" aria-label={`Organise the category ${c.name}`} title="Rename it, change its list or group, merge, hide or remove it" onClick={() => setOrganising(c)}>Organise</button>
                 </div>
               </div>
             ))}
           </div>
         ))}
       </section>
-      {!zeroNow && suggest}
+      {!zeroNow && !planning && suggest}
       <AddCategory onDone={reload} />
-      {z && <ZeroSwitch z={z} onChanged={reload} />}
+      {s.aside?.length > 0 && (
+        <section className="card" data-go="cat-aside-list">
+          <div className="card-head"><h2>Not counted in the budget</h2></div>
+          <p className="sub first">Categories you have left out, such as expenses you are paid back for. Nothing filed here is in your budget, totals or reports.</p>
+          {s.aside.map((c: any) => (
+            <div key={c.id} className="row copy-row">
+              <CatIcon icon={c.icon} />
+              <span className="grow wrap" style={{ flexBasis: 170 }}>{c.name}<small>{c.out > 0 || c.back > 0 ? <>{money(c.out)} out this month{c.back > 0 ? <>, {money(c.back)} back{c.out - c.back > 0.005 ? <>, {money(c.out - c.back)} still to come</> : null}</> : null}</> : 'Nothing this month'}</small></span>
+              <button className="link" onClick={() => dispatchEvent(new CustomEvent('ledger-icon-edit', { detail: { id: c.id, name: c.name, icon: c.icon } }))}>Rename</button>
+              <button className="link" onClick={() => countAgain(c)}>Count it again</button>
+            </div>
+          ))}
+        </section>
+      )}
+      {tucked.length > 0 && (
+        <Fold id="budget-hidden" title="Hidden categories" note={`${tucked.length}`}>
+          <p className="sub first">Categories you have hidden. Their past spending is still in your totals and reports.</p>
+          {tucked.map((c: any) => (
+            <div key={c.id} className="row"><CatIcon icon={c.icon} /><span className="grow">{c.name}</span><button className="link" onClick={() => unhide(c)}>Show again</button></div>
+          ))}
+        </Fold>
+      )}
+      {organising && <Organise cat={organising} own={myGroups} cats={s.categories} onClose={() => setOrganising(null)} onDone={(n) => { setOrganising(null); if (n) setNote(n); changed(); }} onRemove={() => removeCategory(organising)} />}
+      {z && !planning && <ZeroSwitch z={z} onChanged={reload} />}
     </div>
   );
 }

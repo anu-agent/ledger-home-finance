@@ -43,6 +43,8 @@ import { installStatementRemind } from './statementremind.js';
 import { installCatSuggest } from './catsuggest.js';
 import { installOwners, ownerWhere } from './owners.js';
 import { installOffBudget } from './offbudget.js';
+import { installOrganize } from './organize.js';
+import { applyDuePlans, forgetPlans, installBudgetPlan, plannedFor } from './budgetplan.js';
 import { installUpdateCheck } from './updatecheck.js';
 import { installPrices } from './prices.js';
 import { installZero, zeroFor } from './zero.js';
@@ -125,16 +127,20 @@ app.get('/api/categories', (_req, res) => {
 /** Everything the dashboard shows for one month. Also feeds the recap. */
 function summaryFor(monthArg) {
   const month = validMonth(monthArg);
+  applyDuePlans();   // budgets planned ahead for a month that has now begun (server/budgetplan.js)
   const { start, end, days, y, mo } = monthBounds(month);
   const today = iso(new Date());
   const isCurrent = today.slice(0, 7) === month;
   const lastDay = isCurrent ? Number(today.slice(8)) : days;
 
   const categories = db.prepare(`
-    SELECT c.id, c.name, c.icon, c.color, c.fixed, c.budget, COALESCE(-SUM(t.amount), 0) spent
+    SELECT c.id, c.name, c.icon, c.color, c.fixed, c.budget, c.hidden, c.group_id, COALESCE(-SUM(t.amount), 0) spent
     FROM categories c LEFT JOIN transactions t ON t.category_id = c.id AND t.date >= ? AND t.date < ?
     WHERE c.kind = 'expense' GROUP BY c.id ORDER BY c.sort`).all(start, end)
     .map((c) => ({ ...c, spent: round(c.spent) }));
+  // A month that hasn't begun shows the amounts planned for it, where any were typed.
+  const planned = plannedFor(month);
+  if (planned) for (const c of categories) if (c.id in planned) { c.budget = planned[c.id]; c.planned = true; }
   // A category that carries over (server/rollover.js) has this month's budget raised by what was left in
   // earlier months, or lowered by what was overspent. `budget` is what the month really has to spend, so
   // every total, meter and pace line follows; `base` is the monthly amount as typed, and `carry` the difference.
@@ -154,6 +160,14 @@ function summaryFor(monthArg) {
     c.carry = carried[c.id] || 0;
     if (c.rollover) c.budget = Math.max(0, round(c.base + c.carry));
   }
+
+  // Categories left out of the budget (server/organize.js): what went out under each this month and what
+  // came back. They are in none of the figures below.
+  const aside = db.prepare(`
+    SELECT c.id, c.name, c.icon, COALESCE(-SUM(CASE WHEN t.amount < 0 THEN t.amount END), 0) out,
+           COALESCE(SUM(CASE WHEN t.amount > 0 THEN t.amount END), 0) back
+    FROM categories c LEFT JOIN transactions t ON t.category_id = c.id AND t.date >= ? AND t.date < ?
+    WHERE c.kind = 'aside' GROUP BY c.id ORDER BY c.sort, c.id`).all(start, end).map((c) => ({ ...c, out: round(c.out), back: round(c.back) }));
 
   const byDay = Object.fromEntries(db.prepare(`
     SELECT t.date, -SUM(t.amount) s FROM transactions t JOIN categories c ON c.id = t.category_id
@@ -212,7 +226,7 @@ function summaryFor(monthArg) {
     cashflow.push({ month: m, income: round(row.income), spending: round(row.spending) });
   }
 
-  return {
+  return { aside,
     month, isCurrent, lastDay, days, spent, budget, income, netWorth,
     netWorthChange: prior ? round(netWorth - prior) : 0,
     paceToday: paceAt(lastDay), categories, daily, upcoming, cashflow,
@@ -513,10 +527,11 @@ app.post('/api/categories', (req, res) => {
   const budget = req.body?.budget === undefined || req.body.budget === '' ? 0 : Number(req.body.budget);
   if (!name) return res.status(400).json({ error: 'Enter a name for the category.' });
   if (!Number.isFinite(budget) || budget < 0) return res.status(400).json({ error: 'Enter a budget of 0 or more.' });
-  if (db.prepare('SELECT 1 FROM categories WHERE lower(name) = lower(?)').get(name)) return res.status(400).json({ error: `You already have a category called ${name}.` });
+  const twin = db.prepare('SELECT hidden FROM categories WHERE lower(name) = lower(?)').get(name);
+  if (twin) return res.status(400).json({ error: twin.hidden ? `You already have a category called ${name}, hidden. Show it again at the foot of the Budgets page.` : `You already have a category called ${name}.` });
   const count = db.prepare('SELECT COUNT(*) n FROM categories').get().n;
   // New categories sit just above "Other" in lists.
-  const other = db.prepare("SELECT sort FROM categories WHERE name = 'Other'").get()?.sort ?? 11;
+  const other = db.prepare("SELECT sort FROM categories WHERE COALESCE(key, name) = 'Other'").get()?.sort ?? 11;
   const id = Number(db.prepare("INSERT INTO categories (name, icon, color, kind, fixed, budget, sort) VALUES (?, ?, ?, 'expense', 0, ?, ?)")
     .run(name, icon, CATEGORY_COLORS[count % CATEGORY_COLORS.length], budget, other - 0.5 + count * 0.001).lastInsertRowid);
   res.json({ id, name, icon });
@@ -538,6 +553,7 @@ app.delete('/api/categories/:id', (req, res) => {
     db.prepare('UPDATE recurrings SET category_id = ? WHERE category_id = ?').run(home.id, cat.id);
     db.prepare('DELETE FROM rules WHERE category_id = ?').run(cat.id);
     db.prepare('DELETE FROM categories WHERE id = ?').run(cat.id);
+    forgetPlans(cat.id);
     if (String(cat.id) === getSetting('vipkid_category_id')) setSetting('vipkid_category_id', '');
     db.exec('COMMIT');
     res.json({ ok: true, moved, to: home.name });
@@ -585,7 +601,7 @@ app.patch('/api/categories/:id', (req, res) => {
 
 app.get('/api/accounts', (_req, res) => {
   const checks = lastChecks();
-  const accounts = db.prepare('SELECT * FROM accounts ORDER BY id').all().map((a) => ({ ...a, checked: checks[a.id] || null }));
+  const accounts = db.prepare('SELECT * FROM accounts ORDER BY COALESCE(sort, id), id').all().map((a) => ({ ...a, checked: checks[a.id] || null }));
   const history = db.prepare(`
     SELECT date, SUM(CASE WHEN balance > 0 THEN balance ELSE 0 END) assets,
            SUM(CASE WHEN balance < 0 THEN -balance ELSE 0 END) debts, SUM(balance) net
@@ -1103,6 +1119,8 @@ installStatementRemind(app);
 installCatSuggest(app);
 installOwners(app);
 installOffBudget(app);
+installOrganize(app);
+installBudgetPlan(app);
 app.get('/api/currencies', (_req, res) => res.json({ currency: currency(), list: CURRENCIES.map(([code, name]) => ({ code, name })) }));
 installUpdateCheck(app);
 installPrices(app);

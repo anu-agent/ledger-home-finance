@@ -151,21 +151,44 @@ const FIRST = ['glance', 'outlook', 'recent'];
 function readHidden(): string[] {
   try { const v = JSON.parse(localStorage.getItem('ledger-dash-hidden') || '[]'); return Array.isArray(v) ? v.filter((x) => CARDS.some((c) => c[0] === x)) : []; } catch { return []; }
 }
-function DashChooser({ hidden, onChange }: { hidden: string[]; onChange: (h: string[]) => void }) {
+function readOrder(): string[] {
+  try { const v = JSON.parse(localStorage.getItem('ledger-dash-order') || '[]'); return Array.isArray(v) ? v.filter((x) => CARDS.some((c) => c[0] === x)) : []; } catch { return []; }
+}
+/** The saved order, with any card it doesn't mention (one added since) after it in the usual place. */
+const fullOrder = (order: string[]) => [...order, ...PHONE_ORDER.filter((id) => !order.includes(id))];
+/** The order a phone shows the cards in when none has been chosen. */
+const PHONE_ORDER = ['glance', 'outlook', 'recap', 'totals', 'pace', 'cashflow', 'recent', 'budgets', 'goals', 'classes'];
+/** One card of the dashboard. With a place, it is wrapped so the phone's own order can be applied to it. */
+function Slot({ at, children }: { at?: number; children: React.ReactNode }) {
+  return at == null ? <>{children}</> : <div className="dash-slot" style={{ order: at }}>{children}</div>;
+}
+function DashChooser({ hidden, onChange, order, onOrder, phone }: { hidden: string[]; onChange: (h: string[]) => void; order: string[]; onOrder: (o: string[]) => void; phone: boolean }) {
   const [open, setOpen] = useState(false);
   const set = (id: string, on: boolean) => {
     const next = on ? hidden.filter((x) => x !== id) : [...hidden, id];
     try { localStorage.setItem('ledger-dash-hidden', JSON.stringify(next)); } catch { /* private window: lasts until reload */ }
     onChange(next);
   };
+  const shift = (id: string, by: number) => {
+    const next = fullOrder(order); const at = next.indexOf(id), to = at + by;
+    if (to < 0 || to >= next.length) return;
+    [next[at], next[to]] = [next[to], next[at]];
+    try { localStorage.setItem('ledger-dash-order', JSON.stringify(next)); } catch { /* private window: lasts until reload */ }
+    onOrder(next);
+  };
   if (!open) return <p className="dash-choose"><button className="link" onClick={() => setOpen(true)}>Choose what shows here</button>{hidden.length > 0 && <small> · {hidden.length} hidden</small>}</p>;
   return (
     <section className="card dash-chooser">
       <div className="card-head"><h2>What shows on your dashboard</h2><button className="link" onClick={() => setOpen(false)}>Done</button></div>
       <p className="sub first">Switch off anything you don't use. This is remembered on this device only, so your phone and computer can differ.</p>
-      {CARDS.map(([id, name, what]) => (
-        <label key={id} className="row check"><span className="grow">{name}<small>{what}</small></span><input type="checkbox" checked={!hidden.includes(id)} onChange={(e) => set(id, e.target.checked)} /></label>
+      {phone && <p className="sub">The arrows put the cards in your own order on this phone.</p>}
+      {(phone ? fullOrder(order).map((id) => CARDS.find((c) => c[0] === id)!) : CARDS).map(([id, name, what], i, list) => (
+        <div key={id} className="row check dash-pick">
+          {phone && <span className="order-move"><button type="button" className="link" disabled={i === 0} aria-label={`Move ${name} up`} onClick={() => shift(id, -1)}>↑</button><button type="button" className="link" disabled={i === list.length - 1} aria-label={`Move ${name} down`} onClick={() => shift(id, 1)}>↓</button></span>}
+          <label className="grow dash-pick-name"><span className="grow">{name}<small>{what}</small></span><input type="checkbox" checked={!hidden.includes(id)} onChange={(e) => set(id, e.target.checked)} /></label>
+        </div>
       ))}
+      {phone && order.length > 0 && <p><button className="link" onClick={() => { try { localStorage.removeItem('ledger-dash-order'); } catch { /* nothing kept */ } onOrder([]); }}>Back to the usual order</button></p>}
       {hidden.length > 0 && <p><button className="link" onClick={() => { try { localStorage.removeItem('ledger-dash-hidden'); } catch { /* nothing kept */ } onChange([]); }}>Show everything</button></p>}
     </section>
   );
@@ -305,6 +328,11 @@ export default function Dashboard({ month }: { month: string }) {
   const flipMore = () => { try { localStorage.setItem('ledger-dash-more', more ? '0' : '1'); } catch { /* private window */ } setMore(!more); if (more) scrollTo({ top: 0 }); };
   const brief = phone && !more;
   const show = (id: string) => !hidden.includes(id) && (!brief || FIRST.includes(id));
+  // A phone can put the cards in its own order ("Choose what shows here"). A computer keeps its layout,
+  // where cards sit side by side and the big-screen grid depends on their places.
+  const [order, setOrder] = useState<string[]>(readOrder);
+  const ordered = phone && order.length > 0;
+  const place = (id: string) => (ordered ? fullOrder(order).indexOf(id) - 100 : undefined);
   const [cheer, setCheer] = useState('');
   useEffect(() => {
     setCheer('');
@@ -322,9 +350,10 @@ export default function Dashboard({ month }: { month: string }) {
   const top = [...s.categories].filter((c: any) => !c.fixed && (c.budget > 0 || c.spent > 0)).sort((a: any, b: any) => b.spent / (b.budget || 1) - a.spent / (a.budget || 1)).slice(0, 5);
 
   return (
-    <div className="stack dash">
+    <div className={`stack dash ${ordered ? 'own-order' : ''}`}>
       {cheer === month && <div className="cheer" role="status">🎉 {monthLong(month)} finished {money(s.budget - s.spent)} under budget.</div>}
       {show('glance') && s.isCurrent && o && (
+        <Slot at={place('glance')}>
         <section className="strip" aria-label="At a glance">
           <a className="strip-tile" href="#dashboard" onClick={(e) => { e.preventDefault(); document.getElementById('outlook')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}>
             <div className="label">{o.nextPayday ? `Left before payday, ${dayShort(o.nextPayday.date)}` : 'Lowest in the next five weeks'}</div>
@@ -343,10 +372,10 @@ export default function Dashboard({ month }: { month: string }) {
             <div className={`value ${s.spent > s.budget ? 'bad' : ''}`}><Roll value={s.spent} format={money} intro /></div>
             <div className="track"><div className={s.spent > s.budget ? 'fill over' : 'fill'} style={{ width: `${Math.min(100, (s.spent / (s.budget || 1)) * 100)}%` }} /></div>
           </a>
-        </section>
+        </section>        </Slot>
       )}
-      {show('recap') && <Recap month={month} />}
-      {show('totals') && <section className="tiles">
+      {show('recap') && <Slot at={place('recap')}><Recap month={month} /></Slot>}
+      {show('totals') && <Slot at={place('totals')}><section className="tiles">
         <a className="tile" href="#dashboard/networth">
           <div className="label">Net worth</div>
           <div className="value"><Roll value={s.netWorth} format={money} /></div>
@@ -367,11 +396,11 @@ export default function Dashboard({ month }: { month: string }) {
           <div className="value"><Roll value={Math.abs(saved)} format={money} /></div>
           <div className={saved >= 0 ? 'good' : 'bad'}>{s.income > 0 ? `${Math.round((saved / s.income) * 100)}% of income` : 'No income yet'}</div>
         </a>
-      </section>}
+      </section></Slot>}
 
       <div className={`split ${brief ? 'brief' : ''}`}>
       <div className="stack">
-      {show('pace') && <section className="card">
+      {show('pace') && <Slot at={place('pace')}><section className="card">
         <div className="pace-head">
           <div>
             <div className="label">{s.isCurrent ? 'Spent so far this month' : `Spent in ${monthLong(month)}`}</div>
@@ -409,10 +438,10 @@ export default function Dashboard({ month }: { month: string }) {
           </ResponsiveContainer>
           </div>
         </div>
-      </section>}
+      </section></Slot>}
 
       <div className="cols">
-        {show('cashflow') && <section className="card">
+        {show('cashflow') && <Slot at={place('cashflow')}><section className="card">
           <div className="card-head">
             <h2>Cash flow</h2>
             <div className="legend">
@@ -436,8 +465,8 @@ export default function Dashboard({ month }: { month: string }) {
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </section>}
-        {show('recent') && <section className="card">
+        </section></Slot>}
+        {show('recent') && <Slot at={place('recent')}><section className="card">
           <div className="card-head"><h2>Recent</h2><a href="#transactions">See all</a></div>
           {s.recent.length === 0 && <p className="sub">No transactions this month.</p>}
           {s.recent.map((t: any) => (
@@ -447,24 +476,24 @@ export default function Dashboard({ month }: { month: string }) {
               <TxAmount amount={t.amount} />
             </div>
           ))}
-        </section>}
+        </section></Slot>}
       </div>
       </div>
 
       <div className="cols">
-        {show('budgets') && <section className="card">
+        {show('budgets') && <Slot at={place('budgets')}><section className="card">
           <div className="card-head"><h2>Budgets</h2><a href="#budgets">See all</a></div>
           {top.map((c: any) => (
             <Meter key={c.id} id={c.id} icon={c.icon} name={c.name} spent={c.spent} budget={c.budget} />
           ))}
-        </section>}
-        {show('goals') && <GoalsMini />}
-        {show('classes') && <VipkidGoal />}
-        {show('outlook') && <Outlook o={o} reload={reloadOutlook} />}
+        </section></Slot>}
+        {show('goals') && <Slot at={place('goals')}><GoalsMini /></Slot>}
+        {show('classes') && <Slot at={place('classes')}><VipkidGoal /></Slot>}
+        {show('outlook') && <Slot at={place('outlook')}><Outlook o={o} reload={reloadOutlook} /></Slot>}
       </div>
       </div>
       {phone && <p className="dash-more"><button onClick={flipMore}>{more ? 'Show less' : 'Show more'}</button>{!more && <small>The recap, month totals, charts, budgets and goals</small>}</p>}
-      {!brief && <DashChooser hidden={hidden} onChange={setHidden} />}
+      {!brief && <DashChooser hidden={hidden} onChange={setHidden} order={order} onOrder={setOrder} phone={phone} />}
     </div>
   );
 }

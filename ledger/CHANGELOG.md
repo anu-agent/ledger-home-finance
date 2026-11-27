@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.1.33
+
+- Categories in your own order. On the Budgets page the arrows beside a category (or "⋯" on a phone)
+  move it up or down within its list, and every category menu in the app follows the same order.
+  Nothing filed in a category changes.
+- Organise, beside each category: move it between flexible spending and fixed bills, put it in a group
+  of your own (Giving, Food, Kids…), merge it into another category so its history goes with it, or
+  hide one you no longer use without losing its past.
+- Plan next month before it starts. "Plan next month's budget" at the top of the Budgets page opens the
+  coming month; amounts typed there begin on the 1st and this month is left alone. Works with both ways
+  of budgeting.
+- A category can be left out of the budget (Organise, "Leave it out of the budget"): for work expenses
+  you are paid back for, and the like. What is filed there counts in no budget, total or report, and
+  the Budgets page shows what went out and what came back.
+- Accounts and savings goals can be moved up and down. Goals that share an account are filled from the
+  top, so their order decides which is filled first.
+- On a phone, the dashboard's cards can be put in your own order ("Choose what shows here").
+- Updating is easier to find: Settings, "Updates" shows the steps at any time (Docker installs), the
+  About guide explains updating for each kind of install, and the project page has its own heading for it.
+- Ask your CFO how to do something in Ledger ("can I plan next month's budget?") and it names the page
+  and the button. It is given a short map of the app with each question, on both AI routes.
+- The About guide can be searched. Type what you are after and it lists the pages that cover it, with
+  the sentence it was found in. It works without any AI.
+- Settings has a search box at the top. Type your own word for something ("bank", "dark", "backup")
+  and it lists where that is changed; choosing one opens it. The sections a device opens most often
+  are kept one tap away under the box. That count stays on the device.
+
 ## 0.1.32
 
 - Paydays for people who are retired or on benefits. When you add a payday you now say what it is: a

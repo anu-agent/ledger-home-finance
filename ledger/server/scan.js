@@ -119,7 +119,7 @@ export function installScan(app) {
     const m = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/.exec(String(req.body?.image || ''));
     if (!m) return res.status(400).json({ error: "That file isn't a picture the app can read. Use a PNG or JPEG screenshot." });
     if (m[2].length > 6_500_000) return res.status(400).json({ error: 'That picture is too large. Crop it to the list of transactions and try again.' });
-    const spending = db.prepare("SELECT id, name FROM categories WHERE kind = 'expense' ORDER BY sort").all();
+    const spending = db.prepare("SELECT id, name FROM categories WHERE kind = 'expense' AND hidden = 0 ORDER BY sort").all();
     let found;
     try {
       found = await readScreenshot(m[1], m[2], spending.map((c) => c.name));

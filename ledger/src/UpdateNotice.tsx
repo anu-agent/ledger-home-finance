@@ -35,9 +35,9 @@ function Line({ text }: { text: string }) {
 export function UpdateSteps({ u, onClose }: { u: Update; onClose: () => void }) {
   const image = `${u.image}:latest`;
   return (
-    <Modal title={`Ledger ${u.latest} is available`} onClose={onClose}>
-      <p className="sub">This copy is running {u.current}. Updating keeps your accounts, settings and everything you've entered.</p>
-      {!!u.notes?.length && (
+    <Modal title={u.newer ? `Ledger ${u.latest} is available` : 'How to update Ledger'} onClose={onClose}>
+      <p className="sub">This copy is running {u.current}.{u.newer ? '' : u.latest ? ' That is the newest version, so there is nothing to do today. When a newer one is out, the dashboard says so and these are the steps.' : ' When a newer version is out, the dashboard says so and these are the steps.'} Updating keeps your accounts, settings and everything you've entered.</p>
+      {u.newer && !!u.notes?.length && (
         <div className="update-notes">
           <h3>What's new</h3>
           {u.notes.map((n) => (
@@ -101,7 +101,7 @@ export function UpdateSettings() {
       <label className="row check"><span className="grow wrap">Check for a newer version once a day<small>Ledger reads the latest version number and the list of changes from its project page on GitHub. Nothing about your household is sent; GitHub sees this computer's internet address, as it did when Ledger was installed. Ledger never updates itself: it tells you, and shows how.</small></span>
         <input type="checkbox" checked={!!u.on} disabled={busy} onChange={(e) => act('/api/update', 'PUT', { on: e.target.checked })} /></label>
       <div className="add-actions">
-        {u.newer && <button type="button" className="button" onClick={() => setOpen(true)}>How to update</button>}
+        <button type="button" className={u.newer ? 'button' : 'button-link'} data-go="how-to-update" onClick={() => setOpen(true)}>{u.newer ? 'How to update' : 'How updating works'}</button>
         {u.on && <button type="button" className="button-link" disabled={busy} onClick={() => act('/api/update/check', 'POST')}>{busy ? 'Looking…' : 'Check now'}</button>}
       </div>
       {err && <p className="error" role="alert">{err}</p>}

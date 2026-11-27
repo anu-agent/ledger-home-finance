@@ -17,7 +17,8 @@ const GROUPS = [
 ];
 
 // One account in the list. "Rename" swaps the name for a text box; Enter saves, Escape cancels.
-function AccountRow({ a, onChanged }: { a: any; onChanged: () => void }) {
+function AccountRow({ a, onChanged, first, last }: { a: any; onChanged: () => void; first?: boolean; last?: boolean }) {
+  const move = async (dir: 'up' | 'down') => { try { await api(`/api/accounts/${a.id}/move`, { method: 'POST', body: { dir } }); onChanged(); } catch { /* the row stays where it was */ } };
   const owners = useOwners();
   const setOwner = async (owner: string) => { try { await api(`/api/accounts/${a.id}/owner`, { method: 'PATCH', body: { owner } }); onChanged(); owners.reload(); dispatchEvent(new CustomEvent('ledger-refresh')); } catch { /* the row stays as it was */ } };
   // "Leave out of the budget" (server/offbudget.js): its spending stops counting; the balance still shows.
@@ -61,7 +62,7 @@ function AccountRow({ a, onChanged }: { a: any; onChanged: () => void }) {
         </form>
       ) : (
         <span className="grow">{a.name}
-          <small>{a.institution}{a.bank_name ? ` · ${a.bank_name}` : ''}<span className="wide-only"> · <button className="link" onClick={() => { setName(a.name); setEditing(true); }}>Rename</button>
+          <small>{a.institution}{a.bank_name ? ` · ${a.bank_name}` : ''}<span className="wide-only"> · {!(first && last) && <><span className="order-move"><button className="link" disabled={first} aria-label={`Move ${a.name} up`} title="Move up" onClick={() => move('up')}>↑</button><button className="link" disabled={last} aria-label={`Move ${a.name} down`} title="Move down" onClick={() => move('down')}>↓</button></span> · </>}<button className="link" onClick={() => { setName(a.name); setEditing(true); }}>Rename</button>
             {owners.list.length > 1 && <> · <select className="owner-pick" aria-label={`Whose account ${a.name} is`} value={a.owner || 'joint'} onChange={(e) => setOwner(e.target.value)}>{owners.list.map((w) => <option key={w} value={w}>{owners.possessive(w)}</option>)}</select></>}
             {byHand && <> · <button className="link" data-go="set-balance" onClick={() => { setBal(Math.abs(a.balance).toFixed(2)); setErr(''); setSetting(!setting); }}>Set balance</button> · <button className="link" onClick={remove}>Remove</button></>}
             {checkable && <> · <button className="link" onClick={() => setChecking(!checking)}>Check a statement</button></>}
@@ -84,6 +85,8 @@ function AccountRow({ a, onChanged }: { a: any; onChanged: () => void }) {
       {/* On a phone the row's links are behind this one button. */}
       {!editing && <More name={a.name} sub={`${a.institution} · ${cents(a.balance)}`} items={() => [
         { label: 'Rename', run: () => { setName(a.name); setEditing(true); } },
+        !first && { label: 'Move up', hint: 'One place higher in this list', run: () => move('up') },
+        !last && { label: 'Move down', run: () => move('down') },
         ...owners.list.filter((w) => w !== (a.owner || 'joint')).map((w) => ({ label: `Mark as ${owners.possessive(w).toLowerCase() === 'shared' ? 'shared' : owners.possessive(w)}`, hint: 'Whose account this is', run: () => setOwner(w) })),
         { label: 'Change the icon', run: () => dispatchEvent(new CustomEvent('ledger-logo-edit', { detail: { key: `account ${a.id}`, label: a.name } })) },
         canLeaveOut && (a.off_budget
@@ -218,7 +221,7 @@ export default function Accounts() {
           return (
             <div key={g.title}>
               <div className="group-head"><span>{g.title}{'note' in g && g.note ? <small> · {g.note}</small> : null}</span><span className="num">{cents(items.reduce((a: number, x: any) => a + x.balance, 0))}</span></div>
-              {items.map((a: any) => <AccountRow key={a.id} a={a} onChanged={reload} />)}
+              {items.map((a: any, i: number) => <AccountRow key={a.id} a={a} onChanged={reload} first={i === 0} last={i === items.length - 1} />)}
             </div>
           );
         })}

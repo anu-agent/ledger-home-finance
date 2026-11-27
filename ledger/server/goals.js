@@ -29,13 +29,15 @@ const LINKABLE = ['savings', 'checking', 'investment', 'hsa'];
 const isDate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(`${d}T12:00:00`));
 
 /** Every goal with what's saved, what's left and the monthly amount needed. */
+if (!db.prepare('PRAGMA table_info(goals)').all().some((c) => c.name === 'sort')) db.exec('ALTER TABLE goals ADD COLUMN sort REAL');
+
 export function goals() {
   const today = iso(new Date());
   const accounts = new Map(db.prepare('SELECT id, name, type, balance, available FROM accounts').all().map((a) => [a.id, a]));
   // What's left in each linked account as goals take their share, in the order the goals were made.
   const room = new Map();
   const tax = taxNow();
-  return db.prepare('SELECT * FROM goals ORDER BY id').all().map((g) => {
+  return db.prepare('SELECT * FROM goals ORDER BY COALESCE(sort, id), id').all().map((g) => {
     // A goal that follows the tax bill takes its amount from the estimate, each time.
     if (g.follow === 'tax') g = { ...g, target: round(Math.max(0, tax?.target ?? 0)) };
     const acct = g.account_id ? accounts.get(g.account_id) : null;
@@ -102,6 +104,21 @@ export function installGoals(app) {
     const g = read(req.body, existing);
     if (g.error) return res.status(400).json({ error: g.error });
     db.prepare('UPDATE goals SET name = ?, icon = ?, target = ?, target_date = ?, account_id = ?, saved = ?, follow = ? WHERE id = ?').run(g.name, g.icon, g.target, g.date, g.accountId, g.saved, g.follow, existing.id);
+    res.json(answer());
+  });
+
+  // One place up or down. The order matters: goals that share an account are filled from the top.
+  app.post('/api/goals/:id/move', (req, res) => {
+    const dir = req.body?.dir === 'up' ? -1 : req.body?.dir === 'down' ? 1 : 0;
+    const all = db.prepare('SELECT id FROM goals ORDER BY COALESCE(sort, id), id').all();
+    const at = all.findIndex((g) => g.id === Number(req.params.id));
+    if (!dir || at < 0) return res.status(400).json({ error: 'That goal could not be moved.' });
+    const to = at + dir;
+    if (all[to]) {
+      [all[at], all[to]] = [all[to], all[at]];
+      const set = db.prepare('UPDATE goals SET sort = ? WHERE id = ?');
+      all.forEach((g, i) => set.run(i + 1, g.id));
+    }
     res.json(answer());
   });
 

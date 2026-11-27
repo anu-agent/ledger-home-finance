@@ -125,7 +125,7 @@ function takeHome() {
 const USUAL_SHARES = { Groceries: 600, 'Dining out': 250, 'Gas and car': 200, Shopping: 300, Entertainment: 120, Health: 100, Travel: 200, Rent: 1650, Housing: 1650, Pets: 60, 'Bills and utilities': 225, Subscriptions: 76, Insurance: 118, Other: 50 };
 
 async function suggestBudgets() {
-  const cats = db.prepare("SELECT id, name, COALESCE(key, name) known, icon, budget, fixed FROM categories WHERE kind = 'expense' ORDER BY sort").all();
+  const cats = db.prepare("SELECT id, name, COALESCE(key, name) known, icon, budget, fixed FROM categories WHERE kind = 'expense' AND hidden = 0 ORDER BY sort").all();
   // The last three full months that have purchases in them.
   const thisMonth = iso(new Date()).slice(0, 7);
   const months = db.prepare(`SELECT substr(t.date, 1, 7) m, COUNT(*) n FROM transactions t JOIN categories c ON c.id = t.category_id
@@ -189,7 +189,7 @@ export function installSetup(app) {
       bankConnected: connected(),
       accounts: db.prepare("SELECT id, name, type, balance, manual FROM accounts WHERE type NOT IN ('cash') ORDER BY id").all(),
       paydays: db.prepare('SELECT COUNT(*) n FROM pay_schedules').get().n,
-      budgets: db.prepare("SELECT id, name, icon, budget, fixed FROM categories WHERE kind = 'expense' ORDER BY sort").all(),
+      budgets: db.prepare("SELECT id, name, icon, budget, fixed FROM categories WHERE kind = 'expense' AND hidden = 0 ORDER BY sort").all(),
     });
   });
 

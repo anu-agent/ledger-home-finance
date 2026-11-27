@@ -19,7 +19,7 @@ const NOT_SPLIT = 't.split_of IS NULL AND t.left_out IS NULL AND t.id NOT IN (SE
 const round = (n) => Math.round(n * 100) / 100;
 
 const otherId = () => db.prepare("SELECT id FROM categories WHERE COALESCE(key, name) = 'Other'").get()?.id;
-const choices = () => db.prepare("SELECT id, name FROM categories WHERE kind = 'expense' AND COALESCE(key, name) != 'Other' ORDER BY name").all();
+const choices = () => db.prepare("SELECT id, name FROM categories WHERE kind = 'expense' AND hidden = 0 AND COALESCE(key, name) != 'Other' ORDER BY sort, name").all();
 
 /** Merchants with purchases still in Other, biggest total first. */
 function inOther() {

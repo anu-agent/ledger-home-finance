@@ -1,4 +1,5 @@
 import { GO, jump } from '../go';
+import { SettingsSearch } from '../SettingsSearch';
 import { CurrencySettings } from '../Currency';
 import { currencyCode } from '../lib';
 import { GigPay } from './GigPay';
@@ -364,7 +365,7 @@ function Passkeys() {
   };
   const day = (ms: number) => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   return (
-    <section className="card">
+    <section className="card" data-go="passkeys">
       <div className="card-head"><h2>Passkeys</h2>{data?.passkeys.length > 0 && <span className="good">{data.passkeys.length} added</span>}</div>
       <p className="sub first">Sign in with Face ID, Touch ID or your device's PIN instead of typing the password. Your password keeps working as a backup.</p>
       {data?.passkeys.map((k: any) => (
@@ -1609,7 +1610,7 @@ function Appearance() {
   ].filter(Boolean).join(', ');
   const motionNote = [`${fade}-second fade`, `${phone ? 'fireworks' : 'characters'} ${cast ? 'on' : 'off'}`, `snow ${motion ? 'on' : 'off'}`].join(', ');
   return (
-    <section className="card">
+    <section className="card" data-go="appearance">
       <div className="card-head"><h2>Appearance</h2>{changed && <button className="link" onClick={() => change(STANDARD_LOOK)}>Back to the standard look</button>}</div>
       <p className="sub first">Saved on this device only.</p>
 
@@ -1896,11 +1897,12 @@ export default function Connections({ onChanged }: { onChanged: () => void }) {
 
   return (
     <div className="stack narrow">
+      <SettingsSearch />
       {/* How the app looks is a different kind of setting from the connections below, so it sits at the top beside the password. */}
       <h3 className="group-title">This device</h3>
       <div className="split two top-pair">
       <div className="stack">
-      <section className="card">
+      <section className="card" data-go="password">
         <div className="card-head"><h2>Password</h2>{s.passwordSet && <span className="good">On</span>}</div>
         {s.passwordSet ? (
           <>

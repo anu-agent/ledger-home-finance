@@ -72,14 +72,16 @@ export function GoalsCard() {
       setEditing(null); forgetLoaded(); reload();
     } catch (e: any) { setErr(e.message); }
   };
+  const move = async (g: any, dir: 'up' | 'down') => { try { await api(`/api/goals/${g.id}/move`, { method: 'POST', body: { dir } }); forgetLoaded(); reload(); } catch { /* stays where it was */ } };
   const remove = async (g: any) => { if (!confirm(`Remove the goal "${g.name}"? Your money isn't touched.`)) return; await api(`/api/goals/${g.id}`, { method: 'DELETE' }); forgetLoaded(); reload(); };
   return (
     <section className="card" data-go="goals">
       <div className="card-head"><h2>Savings goals</h2></div>
       {data.goals.length === 0 && editing == null && <p className="sub first">Something you're saving toward: an emergency fund, a holiday, a car. Give it an amount, and a date if you have one, and Ledger shows how far along you are and how much to put away each month.</p>}
-      {data.goals.map((g: any) => (
+      {data.goals.length > 1 && <p className="sub" style={{ margin: '0 0 6px' }}>Goals that share an account are filled from the top, so the arrows decide which one is filled first.</p>}
+      {data.goals.map((g: any, i: number) => (
         <GoalRow key={g.id} g={g}>
-          <span className="goal-actions"><button className="link" onClick={() => start(g)}>Change</button><button className="link" onClick={() => remove(g)}>Remove</button></span>
+          <span className="goal-actions">{data.goals.length > 1 && <span className="order-move"><button className="link" disabled={i === 0} aria-label={`Move ${g.name} up`} title="Move up" onClick={() => move(g, 'up')}>↑</button><button className="link" disabled={i === data.goals.length - 1} aria-label={`Move ${g.name} down`} title="Move down" onClick={() => move(g, 'down')}>↓</button></span>}<button className="link" onClick={() => start(g)}>Change</button><button className="link" onClick={() => remove(g)}>Remove</button></span>
         </GoalRow>
       ))}
       {editing == null ? <div className="add-actions" style={{ marginTop: 12 }}><button className="primary" onClick={() => start()}>Add a goal</button></div> : (

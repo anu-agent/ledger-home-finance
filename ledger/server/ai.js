@@ -123,7 +123,7 @@ export function installAi(app) {
   const sentView = () => ({
     log: db.prepare('SELECT at, feature, sent FROM ai_usage ORDER BY id DESC LIMIT 40').all().map((r) => ({ at: r.at, feature: FEATURES[r.feature] || r.feature, sent: r.sent || '' })),
     private: privateCats(),
-    categories: db.prepare("SELECT id, name, icon FROM categories WHERE kind = 'expense' ORDER BY sort, name").all(),
+    categories: db.prepare("SELECT id, name, icon FROM categories WHERE kind = 'expense' AND hidden = 0 ORDER BY sort, name").all(),
   });
   app.get('/api/ai/sent', (_req, res) => res.json(sentView()));
   app.put('/api/ai/private', (req, res) => {

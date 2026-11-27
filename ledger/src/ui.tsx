@@ -275,7 +275,7 @@ export function CategoryPicker({ cats, value, onChange, label, blank, allowNew =
     <>
       <select value={value} aria-label={label} onChange={(e) => (e.target.value === 'new' ? setMaking(true) : onChange(e.target.value))}>
         {blank != null && <option value="">{blank}</option>}
-        {list.map((c) => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
+        {list.filter((c: any) => !c.hidden || String(c.id) === String(value)).map((c: any) => <option key={c.id} value={c.id}>{c.icon} {c.name}{c.kind === 'aside' ? ' (not counted)' : ''}</option>)}
         {allowNew && <option value="new">＋ New category…</option>}
       </select>
       {making && createPortal(

@@ -13,6 +13,7 @@ import { cents as moneyCents, currencyNote } from './money.js';
 import Anthropic from '@anthropic-ai/sdk';
 import crypto from 'node:crypto';
 import { settleBudgets } from './rollover.js';
+import { howLedgerWorks } from './howto.js';
 import { db, getSetting, iso } from './db.js';
 import { apiKey, model, buildFacts, readableError } from './recap.js';
 import { noteUsage, aiSource, limitMessage, notPrivate, privateCats } from './ai.js';
@@ -410,7 +411,7 @@ async function ask(convo, question, deps) {
       const send = () => client.messages.create({
         model: model(),
         max_tokens: 8000,
-        system: `${SYSTEM}${web ? LOOKUP_SYSTEM : ''}${privateCats().length ? PRIVATE_NOTE : ''}${currencyNote() ? '\n\n' + currencyNote() : ''}\n\nToday is ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} (${iso(new Date())}).`,
+        system: `${SYSTEM}\n\n${howLedgerWorks()}${web ? LOOKUP_SYSTEM : ''}${privateCats().length ? PRIVATE_NOTE : ''}${currencyNote() ? '\n\n' + currencyNote() : ''}\n\nToday is ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} (${iso(new Date())}).`,
         tools: web ? [...TOOLS, ...WEB_TOOLS] : TOOLS,
         messages,
       });
@@ -466,7 +467,7 @@ async function ask(convo, question, deps) {
 // The CFO through Home Assistant's own AI: one question, one bundle of figures, one answer. None of what
 // Claude's own service gives the full CFO is promised there (asking for figures step by step, looking up
 // official pages, proposing changes), so it gets the everyday figures up front and answers from those.
-const PLAIN_SYSTEM = `You are the financial officer inside Ledger, a household's private personal finance app. The people asking are the household themselves. Answer their question from the figures given below and nothing else. If the figures don't cover what they ask, say so plainly and say which page of Ledger would show it (Transactions, Budgets, Recurring, Debt, Accounts, Reports, Taxes).
+const PLAIN_SYSTEM = `You are the financial officer inside Ledger, a household's private personal finance app. The people asking are the household themselves. Answer their question from the figures given below and nothing else. If the figures don't cover what they ask, say so plainly and say which page of Ledger would show it. A question about how to do something in Ledger is answered from the list of how things are done, below.
 
 Amounts that are negative are money out. Give dollar figures as they are, without rounding away cents that matter. Be brief and plain: a few sentences, or a short list with "- " at the start of each line. No headings and no tables.
 
@@ -488,7 +489,7 @@ async function askPlain(convo, question, deps) {
   const earlier = convo.plain.slice(-4).map((t) => `They asked: ${t.q}\nYou answered: ${t.a}`).join('\n\n');
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const text = await haAsk('a question about the household\'s money',
-    `${PLAIN_SYSTEM}${privateCats().length ? PRIVATE_NOTE : ''}\n\nToday is ${today}.\n\nThe household's figures:\n${capped(facts, 45000)}${earlier ? `\n\nEarlier in this conversation:\n${earlier}` : ''}\n\nTheir question: ${question}`,
+    `${PLAIN_SYSTEM}\n\n${howLedgerWorks()}${privateCats().length ? PRIVATE_NOTE : ''}\n\nToday is ${today}.\n\nThe household's figures:\n${capped(facts, 45000)}${earlier ? `\n\nEarlier in this conversation:\n${earlier}` : ''}\n\nTheir question: ${question}`,
     'cfo', "your question, with this month's totals, your accounts, bills, debts and savings goals");
   convo.plain.push({ q: question, a: text });
   convo.turns++;

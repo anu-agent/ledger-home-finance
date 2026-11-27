@@ -88,7 +88,7 @@ function AddForm({ cats, accounts, onAdded, onClose, onNewCategory, start = 'out
         <label>Date<input type="date" value={f.date} max={todayIso()} onChange={set('date')} /></label>
         <label>Category
           <select value={f.category_id} onChange={pickCategory}>
-            {cats.map((c) => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
+            {cats.filter((c) => !c.hidden || String(c.id) === String(f.category_id)).map((c) => <option key={c.id} value={c.id}>{c.icon} {c.name}{c.kind === 'aside' ? ' (not counted)' : ''}</option>)}
             <option value="new">＋ New category…</option>
           </select>
         </label>
@@ -194,7 +194,7 @@ function OtherReview({ cats, onChanged }: { cats: any[]; onChanged: () => void }
     } catch (e: any) { setErr(e.message); }
     setBusy('');
   };
-  const expense = cats.filter((c) => c.kind === 'expense');
+  const expense = cats.filter((c) => c.kind === 'expense' || c.kind === 'aside');
   return (
     <section className="card deposit-review other-review">
       <div className="row">
@@ -483,7 +483,7 @@ function ScanForm({ cats, accounts, onAdded, onClose }: { cats: any[]; accounts:
                               <div key={n} className="scan-line">
                                 <span className="scan-line-name">{x.name}</span>
                                 <span className="num">{cents(x.amount)}</span>
-                                <CategoryPicker cats={cats.filter((c) => c.kind === 'expense')} value={x.category_id} onChange={(id) => moveLine(r, n, id)} label={`Category for ${x.name}`} />
+                                <CategoryPicker cats={cats.filter((c) => c.kind === 'expense' || c.kind === 'aside')} value={x.category_id} onChange={(id) => moveLine(r, n, id)} label={`Category for ${x.name}`} />
                               </div>
                             ))}
                           </div>
@@ -505,7 +505,7 @@ function ScanForm({ cats, accounts, onAdded, onClose }: { cats: any[]; accounts:
                   {parts.map((p, i) => (
                     <div key={p.category_id} className="split-part">
                       <span className="num scan-rest">{cents(i === 0 ? Math.max(0, restOf(r)) : p.amount)}</span>
-                      <CategoryPicker cats={cats.filter((c) => c.kind === 'expense')} value={p.category_id} onChange={(id) => movePart(r, p.category_id, id)} label={`Category of part ${i + 1}`} />
+                      <CategoryPicker cats={cats.filter((c) => c.kind === 'expense' || c.kind === 'aside')} value={p.category_id} onChange={(id) => movePart(r, p.category_id, id)} label={`Category of part ${i + 1}`} />
                       <small>{r.lines.filter((x: any) => x.category_id === p.category_id).length} item{r.lines.filter((x: any) => x.category_id === p.category_id).length === 1 ? '' : 's'}</small>
                     </div>
                   ))}
@@ -556,7 +556,7 @@ function SplitForm({ t, cats, onDone, onClose }: { t: any; cats: any[]; onDone: 
       {parts.map((p, i) => (
         <div key={i} className="split-part">
           <input type="number" min="0" step="0.01" inputMode="decimal" placeholder="Amount" aria-label={`Amount of part ${i + 1}`} value={p.amount} onChange={(e) => set(i, 'amount', e.target.value)} autoFocus={i === 0} />
-          <CategoryPicker cats={cats.filter((c) => c.kind === t.kind || c.kind === 'transfer')} value={p.category_id} onChange={(id) => set(i, 'category_id', id)} label={`Category of part ${i + 1}`} blank="Choose a category" allowNew={t.kind === 'expense'} />
+          <CategoryPicker cats={cats.filter((c) => c.kind === t.kind || c.kind === 'transfer' || (c.kind === 'aside' && t.kind === 'expense') || (c.kind === 'expense' && t.kind === 'aside'))} value={p.category_id} onChange={(id) => set(i, 'category_id', id)} label={`Category of part ${i + 1}`} blank="Choose a category" allowNew={t.kind === 'expense'} />
           {parts.length > 1 && <button type="button" className="link" onClick={() => setParts(parts.filter((_, j) => j !== i))}>Remove</button>}
         </div>
       ))}
@@ -887,7 +887,7 @@ export default function Transactions({ month, review = false, start = '' }: { mo
         </select>
         <select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Category">
           <option value="">All categories</option>
-          {cats?.map((c) => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
+          {cats?.map((c) => <option key={c.id} value={c.id}>{c.icon} {c.name}{c.kind === 'aside' ? ' (not counted)' : ''}</option>)}
         </select>
         <select value={account} onChange={(e) => setAccount(e.target.value)} aria-label="Account">
           <option value="">All accounts</option>
@@ -1008,6 +1008,7 @@ export default function Transactions({ month, review = false, start = '' }: { mo
                     {t.merchant}
                     {t.waiting ? <i className="pulse" role="img" aria-label="Waiting for the bank" /> : null}
                     {t.left_out ? <em className="left-out-tag">left out</em> : null}
+                    {t.kind === 'aside' ? <em className="left-out-tag" title="This category is left out of the budget (Budgets page).">not counted</em> : null}
                     {!t.left_out && t.acct_out ? <em className="left-out-tag" title="This account is left out of the budget (Accounts page). Choose a category to count this one purchase.">account left out</em> : null}
                     {!t.waiting && t.settled_at && Date.now() - t.settled_at < 3 * 86400000 ? <i className="matched" role="img" aria-label="The bank's entry matched the one you added">✓</i> : null}
                   </span>
@@ -1048,7 +1049,7 @@ export default function Transactions({ month, review = false, start = '' }: { mo
                 <span className="cat">
                   <select value={t.category_id} aria-label={`Category for ${t.merchant}`}
                     onChange={(e) => { if (e.target.value === 'new') { setCreating(t); setNewErr(''); } else changeOne(t, Number(e.target.value)); }}>
-                    {cats?.map((c) => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
+                    {cats?.filter((c) => !c.hidden || c.id === t.category_id).map((c) => <option key={c.id} value={c.id}>{c.icon} {c.name}{c.kind === 'aside' ? ' (not counted)' : ''}</option>)}
                     <option value="new">＋ New category…</option>
                   </select>
                 </span>

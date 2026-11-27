@@ -8,7 +8,7 @@
 // (src/pages/AboutArt.tsx). The text lives in PAGES below, one entry per page.
 //
 // When a feature changes, change its paragraph here too: this page is the only manual there is.
-import { useEffect, useState } from 'react';
+import { isValidElement, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ART } from './AboutArt';
 import { JUST_ADDED, UPDATES } from '../updates';
@@ -21,7 +21,7 @@ const SECTIONS: [id: string, title: string, inside: string][] = [
   ['around', 'Finding your way around', 'Each page in a line'],
   ['money-in', 'Getting your money in', 'Bank connection, adding by hand, receipts, files'],
   ['forecast', 'The checking forecast', 'How “left before payday” is worked out'],
-  ['budgets', 'Budgets and categories', 'Suggested budgets, splitting a purchase, logos and icons'],
+  ['budgets', 'Budgets and categories', 'Setting, organising and planning budgets, splitting a purchase, icons'],
   ['bills', 'Bills', 'What the Recurring page tracks'],
   ['goals', 'Savings goals and debt', 'Saving toward something, and paying things off'],
   ['taxes', 'How the tax estimate works', 'What it counts, and what it leaves out'],
@@ -87,10 +87,10 @@ function WhatsNew() {
 }
 
 /** The pop-up: one topic, a page at a time. Arrow keys turn the page, Escape or a click outside closes it. */
-function Reader({ n, pages, onClose, onTopic }: { n: number; pages: React.ReactNode[]; onClose: () => void; onTopic: (n: number) => void }) {
+function Reader({ n, pages, start = 0, onClose, onTopic }: { n: number; pages: React.ReactNode[]; start?: number; onClose: () => void; onTopic: (n: number) => void }) {
   const [id, title] = SECTIONS[n];
-  const [page, setPage] = useState(0);
-  useEffect(() => setPage(0), [n]);
+  const [page, setPage] = useState(start);
+  useEffect(() => setPage(start), [n, start]);
   const last = pages.length - 1;
   const go = (to: number) => setPage(Math.max(0, Math.min(last, to)));
   useEffect(() => {
@@ -205,10 +205,74 @@ function Feedback() {
   );
 }
 
+/** The words of a piece of the guide, read out of its markup (examples drawn from components have none). */
+function textOf(node: React.ReactNode): string {
+  if (node == null || typeof node === 'boolean') return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(textOf).join(' ');
+  if (isValidElement(node)) return textOf((node.props as { children?: React.ReactNode }).children);
+  return '';
+}
+
+/**
+ * Searching the guide (2026-11-26): for someone without AI, who can't ask the CFO "can I plan next month?"
+ * and would otherwise have to guess which topic holds the answer. Every page of every topic is read into
+ * plain text once; typing lists the pages that contain every word typed, with the sentence it was found in,
+ * and choosing one opens the guide at that page. Nothing leaves the page.
+ */
+function GuideSearch({ pages, onOpen, q, setQ }: { pages: Record<string, React.ReactNode[]>; onOpen: (topic: number, page: number) => void; q: string; setQ: (v: string) => void }) {
+  const index = useMemo(() => SECTIONS.flatMap(([id, title], n) => (pages[id] || []).map((pg, i, all) => ({ n, title, page: i, of: all.length, text: textOf(pg).replace(/\s+/g, ' ').trim() }))).filter((x) => x.text.length > 20), [pages]);
+  const words = q.toLowerCase().split(/\s+/).filter((w) => w.length > 1);
+  // "budgets" should find "budget".
+  const forms = (w: string) => (w.length > 3 && w.endsWith('s') ? [w, w.slice(0, -1)] : [w]);
+  const hits = !words.length ? [] : index.map((x) => {
+    const low = x.text.toLowerCase(), head = x.title.toLowerCase();
+    let at = -1, score = 0;
+    for (const w of words) {
+      const found = forms(w).map((f) => low.indexOf(f)).filter((i) => i >= 0);
+      const inTitle = forms(w).some((f) => head.includes(f));
+      if (!found.length && !inTitle) return null;
+      if (found.length && at < 0) at = Math.min(...found);
+      score += (inTitle ? 3 : 0) + Math.min(3, forms(w).reduce((a, f) => a + low.split(f).length - 1, 0));
+    }
+    const from = Math.max(0, low.lastIndexOf('. ', Math.max(0, at - 1)) + 2 > at - 110 ? low.lastIndexOf('. ', Math.max(0, at - 1)) + 2 : at - 60);
+    const bit = x.text.slice(at < 0 ? 0 : from, (at < 0 ? 0 : from) + 170);
+    return { ...x, score, bit: `${(at < 0 ? 0 : from) > 0 && !/^[A-Z“"]/.test(bit) ? '…' : ''}${bit}${x.text.length > from + 170 ? '…' : ''}` };
+  }).filter(Boolean).sort((a, b) => b!.score - a!.score).slice(0, 8) as { n: number; title: string; page: number; of: number; bit: string }[];
+  const mark = (t: string) => {
+    const all = words.flatMap(forms).sort((a, b) => b.length - a.length).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    if (!all.length) return t;
+    return t.split(new RegExp(`(${all.join('|')})`, 'gi')).map((part, i) => (i % 2 ? <mark key={i}>{part}</mark> : part));
+  };
+  return (
+    <div className="settings-search guide-search">
+      <label className="settings-search-box">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+        <input type="search" value={q} data-go="guide-search" placeholder="Search the guide: plan next month, refund, backup…" aria-label="Search the guide" autoComplete="off" enterKeyHint="search"
+          onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') setQ(''); if (e.key === 'Enter' && hits[0]) onOpen(hits[0].n, hits[0].page); }} />
+        {q && <button type="button" className="link" aria-label="Clear the search" onClick={() => setQ('')}>Clear</button>}
+      </label>
+      {words.length > 0 && (
+        <div className="settings-hits" role="list">
+          <small>{hits.length === 0 ? 'Nothing in the guide mentions that.' : hits.length === 8 ? 'The 8 closest places' : `${hits.length} place${hits.length === 1 ? '' : 's'} in the guide`}</small>
+          {hits.map((h) => (
+            <button key={`${h.n}-${h.page}`} type="button" role="listitem" className="settings-hit" onClick={() => onOpen(h.n, h.page)}>
+              <span className="grow"><b>{h.title}</b>{h.of > 1 ? <em className="guide-page"> · page {h.page + 1} of {h.of}</em> : null}<small>{mark(h.bit)}</small></span><span aria-hidden="true">›</span>
+            </button>
+          ))}
+          {hits.length === 0 && <p className="sub">Try a different word, or fewer words. If Ledger doesn't do what you're after, <button className="link" onClick={() => onOpen(SECTIONS.findIndex((x) => x[0] === 'ask'), 0)}>ask for it</button>.</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function About() {
   const gig = useGig();
   // A link such as #about/taxes opens straight to that topic.
   const [open, setOpen] = useState(() => SECTIONS.findIndex((s) => s[0] === (location.hash.split('/')[1] || '')));
+  const [start, setStart] = useState(0);   // the page a topic opens on (a search result opens mid-topic)
+  const [q, setQ] = useState('');
   // Each topic's text, a page at a time. The pop-up shows one page with Back and Next.
   const PAGES: Record<string, React.ReactNode[]> = {
     'what': [
@@ -219,16 +283,16 @@ export default function About() {
     ],
     'around': [
       <>
-        <ul><li><b>Dashboard.</b> The day-to-day view: what's left before payday, what's in checking, this month's spending against your budget, a short written recap, and the bills and paychecks coming up. "Choose what shows here", at the foot of the page, hides any card you don't use; that choice is kept on each device.</li><li><b>Transactions.</b> Every purchase, payment and deposit. Change a category, split a purchase across categories, search, and add things by hand.</li><li><b>Budgets.</b> A monthly amount for each kind of spending, and how much of each you've used.</li></ul>
+        <ul><li><b>Dashboard.</b> The day-to-day view: what's left before payday, what's in checking, this month's spending against your budget, a short written recap, and the bills and paychecks coming up. "Choose what shows here", at the foot of the page, hides any card you don't use; that choice is kept on each device.</li><li><b>Transactions.</b> Every purchase, payment and deposit. Change a category, split a purchase across categories, search, and add things by hand.</li><li><b>Budgets.</b> A monthly amount for each kind of spending, and how much of each you've used. Categories can be put in your own order and groups, and next month can be planned before it starts.</li></ul>
       </>,
       <>
-        <ul><li><b>Recurring.</b> The bills Ledger has noticed coming round, with when each is next due.</li><li><b>Debt.</b> Cards and loans, with a plan for which to pay off first and when you'd be clear.</li><li><b>Accounts.</b> Every account and its balance, your net worth over time, and your savings goals.</li></ul>
+        <ul><li><b>Recurring.</b> The bills Ledger has noticed coming round, with when each is next due.</li><li><b>Debt.</b> Cards and loans, with a plan for which to pay off first and when you'd be clear.</li><li><b>Accounts.</b> Every account and its balance, your net worth over time, and your savings goals. An account can be left out of the budget.</li></ul>
       </>,
       <>
-        <ul><li><b>Reports.</b> Spending and income over the months.</li><li><b>Taxes.</b> An estimate of this year's federal and Arkansas tax.</li><li><b>Settings.</b> Bank connection, paydays, appearance, password and the rest.</li></ul>
+        <ul><li><b>Reports.</b> Spending and income over the months.</li><li><b>Taxes.</b> An estimate of this year's United States federal and state income tax. Outside the United States it can be switched off in Settings, "Tax section".</li><li><b>Settings.</b> SimpleFIN Sync (the bank connection), paydays, currency, appearance, password and the rest, with a search box at the top.</li></ul>
       </>,
       <>
-        <p>The round <b>+</b> button, on every page, adds a purchase or a deposit, reads a receipt or a bank screenshot, or records a transfer. The seal under the menu opens <b>Ask your CFO</b>.</p>
+        <p>The round <b>+</b> button, on every page, adds a purchase or a deposit, reads a receipt or a bank screenshot, or records a transfer. The seal under the menu (the middle of the Menu on a phone) opens <b>Ask your CFO</b>. The box at the top of this guide searches all of it.</p>
       </>,
     ],
     'money-in': [
@@ -239,7 +303,7 @@ export default function About() {
         <ul><li><b>Connect your bank</b> (Settings, "SimpleFIN Sync", where the box for your SimpleFIN setup token is). This uses SimpleFIN Bridge, a separate service that costs $1.50 a month or $15 a year, paid to them. Your bank password is typed on their site and never reaches Ledger. <b>It runs about a day behind:</b> SimpleFIN visits each bank roughly once every 24 hours, so a purchase made this morning may not show until tomorrow. The dashboard says when the bank's figures were last updated and when the next update is expected. Banks sometimes ask you to sign in again at SimpleFIN; when one does, or an account's figures haven't moved in five days, a line at the top of the dashboard says so.</li><li><b>Add it yourself.</b> Press + and type the purchase. It counts toward your spending and your checking estimate straight away, marked "waiting for the bank". When the bank's own entry arrives, it takes over that line and keeps your category and note, so nothing is counted twice.</li><li><b>Read a receipt.</b> On a phone, press + and choose <b>Read a receipt</b>: the camera opens straight away, you photograph the receipt, and Ledger reads the shop, the total and the date for you to check. If the receipt covers more than one kind of spending (food, clothing and medicine in one trip), it sorts the items into your categories and suggests a split. Each tax on the receipt goes with the items it was charged on (alcohol and food are taxed differently from other things), as far as the receipt shows. Open "Review the items" to see every item and where it was filed, and move any of them to another category; the split follows. Or choose "Keep it as one purchase". If your bank has already listed that purchase, nothing is added twice: Ledger offers to split the one that's there. <b>Upload a receipt</b>, in the same menu, is for a picture you already have: an older photo of a receipt, or a screenshot of pending charges from your bank's app, which it reads row by row. Nothing is added until you've checked it. A receipt's picture is kept with its purchase: choose <b>Receipt</b> on that line to see it again.</li><li><b>Import a file</b> (Settings, Import a file). A CSV export from your bank, for accounts the connection can't reach. Importing the same months twice doesn't double anything. If your bank offers no CSV, <b>Read a PDF or photo of a statement</b> in the same place has Claude list the statement's transactions for you to check before any are added.</li></ul>
       </>,
       <>
-        <p>Without a bank connection you can still keep accounts by hand: add them with today's balance in the setup guide, and add purchases as you make them.</p>
+        <p>Without a bank connection you can still keep accounts by hand: add them with today's balance in the setup guide or with "Add an account by hand" on the Accounts page, and add purchases as you make them.</p>
         <p><b>Accounts you keep yourself.</b> On the Accounts page, "Add an account by hand" makes one with today's balance. From then on its balance follows the purchases, deposits and transfers you enter on it. "Set balance" corrects it whenever it drifts from the real figure, and an account with nothing on it can be removed.</p>
         <p><b>Leaving something out.</b> If the bank posts a charge twice, or something shouldn't count as spending, choose "Leave out" in its fine print on the Transactions page. It stays in the list with a "left out" tag but no longer counts toward your spending, budgets or income, and "Put back" undoes it. Nothing is deleted.</p>
         <p><b>Fixing a mistake.</b> Anything you typed in has "Edit" in its fine print on the Transactions page, for its name, amount and date. What the bank reported can't be changed, only filed, split or noted. The search box also finds an amount.</p>
@@ -275,7 +339,7 @@ export default function About() {
         <p><b>Logos and icons.</b> Ledger shows a company's logo beside its purchases where it can find one. To set or change one, click the icon wherever you see it: beside a transaction, a bill, an account, a row in the dashboard's outlook or recent activity, or in a report. A category's icon changes the same way: click it on Budgets or the dashboard and pick another. You can take a logo from a website (type the company's address, such as kroger.com), choose a picture of your own, or pick <b>Ask Claude to draw one</b>: say what it should show, such as "a silver SUV" or "a pair of scissors", look at the preview, and keep it or ask for another. Drawn icons are simple, flat pictures, and it draws the thing itself, not a company's logo. Whatever you choose applies to every transaction with that name.</p>
       </>,
       <>
-        <p>Make your own category wherever a category is chosen: every category menu ends with <b>New category…</b>, whether you're adding a purchase or a bill, reading a screenshot, splitting a purchase or moving several at once. The Budgets page has it too. To rename one, choose Rename beside it on the Budgets page, or click its icon anywhere; purchases keep being filed in it under the new name. To remove one, choose Remove beside it on the Budgets page; anything filed in it moves to Other. Transfers between your own accounts and card payments are filed as Transfer and don't count as spending.</p>
+        <p>Make your own category wherever a category is chosen: every category menu ends with <b>New category…</b>, whether you're adding a purchase or a bill, reading a screenshot, splitting a purchase or moving several at once. The Budgets page has it too. To rename one, click its icon anywhere, or choose Organise beside it on the Budgets page; purchases keep being filed in it under the new name. <b>Planning next month.</b> "Plan next month's budget" at the top of the Budgets page opens the coming month before it starts. Amounts typed there begin on the 1st and stay until you change them, and this month is left alone. With "give every dollar a job" switched on, it is where you hand out next month's money ahead of time. To change the order, use the arrows beside a category on the Budgets page ("⋯" on a phone); every category menu follows it. <b>Organise</b>, beside each category, moves it between flexible spending and fixed bills or into a group of your own (Giving, Food, Kids, whatever suits you), merges it into another category so its history goes with it, hides one you no longer use without losing its past, or leaves a category out of the budget altogether: what is filed there (work expenses you are paid back for, say) counts in no budget, total or report, and the Budgets page shows what went out and what came back. Accounts and savings goals have the same arrows, and on a phone "Choose what shows here" at the foot of the dashboard puts its cards in your own order. Remove is in Organise too: anything filed in a removed category moves to Other and its history is lost, so to keep the history use Merge or Hide instead. Transfers between your own accounts and card payments are filed as Transfer and don't count as spending.</p>
       </>,
     ],
     'bills': [
@@ -303,7 +367,7 @@ export default function About() {
     'taxes': [
       <>
         <p><b>Your state comes first.</b> Ledger assumes no state. The first time you open Taxes it shows a map of the United States: tap your state (or choose it from the list) and the estimate appears. You can change it later under "Your household". If you live outside the United States, the tax section has nothing useful to say: switch it off on that first screen or in Settings, "Tax section", and it leaves the menu.</p>
-        <p>The Taxes page estimates this year's <b>federal and state</b> income tax. Choose <b>your state</b> under "Your household" (it starts on Arkansas, where Ledger began). Arkansas is worked out in detail. Every other state uses a simpler table of its rates, standard deduction and personal exemptions, so treat that figure as rough; states with no income tax show federal only. It is an estimate for planning, not tax advice and not a tax return.</p>
+        <p>The Taxes page estimates this year's <b>federal and state</b> income tax. Your state is the one you chose on the map, and can be changed under "Your household". Arkansas, where Ledger began, is worked out in detail. Every other state uses a simpler table of its rates, standard deduction and personal exemptions, so treat that figure as rough; states with no income tax show federal only. It is an estimate for planning, not tax advice and not a tax return.</p>
       </>,
       <>
         <p><b>What it works from:</b> how you file (married filing jointly or separately, single, or head of household), each person's pay for the year and pre-tax deductions such as retirement and health premiums, and any deductions you list. Under <b>More about your household</b> on that page you can add whatever else applies, and each one changes the estimate: your ages, each child's or dependent's birth year, other jobs held this year, Social Security, pensions and retirement withdrawals, unemployment pay, interest and investment income, rental profit, student loan interest, child care, college tuition, mortgage interest, property taxes, giving, medical bills, and insurance bought on the Marketplace. Leave blank anything that doesn't apply.</p>
@@ -342,7 +406,7 @@ export default function About() {
     ],
     'cfo': [
       <>
-        <p>The seal under the menu opens a panel where you can ask about your money in plain words: "How much is left before payday?", "What did we spend on eating out last month?", "Which bills are due in the next two weeks?". It looks the answer up in your own figures.</p>
+        <p>The seal under the menu opens a panel where you can ask about your money in plain words: "How much is left before payday?", "What did we spend on eating out last month?", "Which bills are due in the next two weeks?". It looks the answer up in your own figures. You can ask it about Ledger itself too: "Can I plan next month's budget?", "How do I leave a card out of my budget?", "What can Ledger do that I haven't found?". It answers with the page and the button.</p>
         <p>It can also suggest a few changes when you ask: moving a shop's purchases or one single transaction to another category, making a new category, setting a budget, or renaming a bill. So "file that reimbursement check under a new Classroom category" works. Each suggestion appears with Confirm and Cancel, and nothing changes until you tap Confirm. It can't move money, and it sees nothing outside this app. Closing the panel leaves you on the page you were on, and the conversation is kept while the app stays open.</p>
         <p><b>Catching up with your bank.</b> The bank connection can run a day behind. To catch Ledger up sooner, press the paperclip beside the question box (or the last example on the CFO's opening screen) and choose a screenshot of your bank's recent or pending activity, or the bank's CSV export. A screenshot is read by Claude and its rows come back to tick, each with a category you can change; a CSV is read by Ledger itself and anything already there is skipped. Nothing is added until you press the button. On a connected account what is added waits for the bank, and the bank's own entry takes it over when it arrives, so nothing is counted twice.</p>
       </>,
@@ -362,7 +426,7 @@ export default function About() {
     ],
     'settings': [
       <>
-        <ul><li><b>Appearance.</b> The backdrop (holiday scenes that change through the year, a plain colourway, your own colours, or a photo of your own), light or dark, and <b>Display size</b> if everything looks too small or too large on your screen. These are remembered on each device separately. A photo you choose stays on that device and is never sent to Ledger's server; Ledger picks light or dark text and an accent colour to suit it, and you can dim or blur it.</li><li><b>Paydays.</b> When each paycheck arrives and how much it is. You can upload your employer's pay calendar and Ledger will read the dates.</li><li><b>Side gig.</b> Income with no tax taken out.</li></ul>
+        <ul><li><b>Finding a setting.</b> The box at the top of Settings takes your own word for a thing ("bank", "dark", "backup") and shows where it is changed. Under it, the sections you open most on this device stay one tap away; "Forget these" clears that list, which never leaves your device.</li><li><b>Appearance.</b> The backdrop (holiday scenes that change through the year, a plain colourway, your own colours, or a photo of your own), light or dark, and <b>Display size</b> if everything looks too small or too large on your screen. These are remembered on each device separately. A photo you choose stays on that device and is never sent to Ledger's server; Ledger picks light or dark text and an accent colour to suit it, and you can dim or blur it.</li><li><b>Paydays.</b> When each paycheck arrives and how much it is. You can upload your employer's pay calendar and Ledger will read the dates.</li><li><b>Side gig.</b> Income with no tax taken out.</li></ul>
       </>,
       <>
         <ul><li><b>Signing in.</b> If your copy has a web address, you first confirm who you are there with Google or a code sent to your email. You chose at the start whether that is enough by itself or whether Ledger also asks for a password of its own; Settings, Password changes that either way ("Skip the password after signing in at the web address", or add a password if you have none).</li><li><b>Password.</b> Change it here; changing it signs out your other devices, and you can sign other devices out without changing it. <b>A sign-in for each person:</b> under "People who can sign in" the first person can give another adult a password of their own. Everyone sees the same Ledger; each can change their own password without knowing the other's, and one person's sign-in can be taken away without touching anyone else's. If your copy opens with the sign-in at its web address and has no Ledger password, adding one gives you a spare key. If you forget your password, or that sign-in ever can't be confirmed, choose "Forgot your password?" (or "Can't get in?") on the sign-in screen, then "Email me a reset code": a one-time code arrives at the email address your Ledger was set up with, usually within a couple of minutes, and you choose a new password. On a secure web address you can also add Face ID, Touch ID or a fingerprint under Passkeys.</li>
@@ -370,7 +434,8 @@ export default function About() {
           <li><b>Summary email.</b> A short summary of totals on the days and hour you choose, to whichever addresses you list. It's sent from a Gmail account of yours with an app password, which Google makes for Ledger alone; Settings, Summary email has the five steps and buttons that open the right Google pages. Alerts are sent the same way, so set this up first.</li>
           <li><b>Alerts.</b> A short email when checking is forecast to run low before payday, a bill comes out tomorrow, or a category goes over budget.</li>
           <li><b>What Ledger has learned.</b> The rules it has picked up for filing purchases and claiming them for tax, each with Remove.</li>
-          <li><b>Download your data.</b> Every transaction as a spreadsheet file. It is a record, not a full backup: inside Home Assistant, Ledger is included in Home Assistant's own backups, and Settings says how to keep those somewhere safe.</li><li><b>Delete everything.</b> On a copy someone set up for you, this wipes all of it for good, without asking anyone: accounts, transactions, budgets, receipts, the bank connection and every sign-in. You type the words "delete everything" (and your password, if you have one) so it can't happen by a slip. The person who runs the server is told only that your copy is now empty; its nightly backups drop the last trace within about a month. Download your transactions first if you want to keep them.</li><li><b>Summary email.</b> A short summary on the days you choose: what's left before payday, bills due, and budgets running over. It needs a Gmail address to send from.</li><li><b>The setup guide.</b> "Open the setup guide" walks through your household, accounts, paydays and budgets again, step by step. "Take the tour" (here and at the top of About) shows you round the app: it lights up one thing at a time, the menu, the + button, each page, and says what it is for. It takes about two minutes, changes nothing, and runs once by itself when a new household finishes setting up.</li></ul>
+          <li><b>Updating Ledger.</b> How you update depends on where your copy runs. <b>Installed with Docker on your own computer:</b> the dashboard says when a newer version is out, and Settings, "Updates" shows the version you are running and the two lines to paste, at any time; your data is kept. <b>Inside Home Assistant:</b> updates appear with your other add-on updates under Home Assistant's Settings, Add-ons. <b>A copy someone else runs for you:</b> they update it, and an open page refreshes itself. About, "What's new" lists what each update changed.</li>
+          <li><b>Download your data.</b> Every transaction as a spreadsheet file. It is a record, not a full backup: inside Home Assistant, Ledger is included in Home Assistant's own backups, and Settings says how to keep those somewhere safe.</li><li><b>Delete everything.</b> On a copy someone set up for you, this wipes all of it for good, without asking anyone: accounts, transactions, budgets, receipts, the bank connection and every sign-in. You type the words "delete everything" (and your password, if you have one) so it can't happen by a slip. The person who runs the server is told only that your copy is now empty; its nightly backups drop the last trace within about a month. Download your transactions first if you want to keep them.</li><li><b>The setup guide.</b> "Open the setup guide" walks through your household, accounts, paydays and budgets again, step by step. "Take the tour" (here and at the top of About) shows you round the app: it lights up one thing at a time, the menu, the + button, each page, and says what it is for. It takes about two minutes, changes nothing, and runs once by itself when a new household finishes setting up.</li></ul>
       </>,
     ],
     'privacy': [
@@ -402,9 +467,10 @@ export default function About() {
   };
   return (
     <div className="about">
-      <p className="about-lead">Everything about Ledger, a topic at a time. Choose one to read it. <button className="link" data-tour="tour-again" onClick={() => dispatchEvent(new Event('ledger-tour'))}>Take the tour</button> to be shown round the app instead.</p>
-      {SECTIONS.map((_, n) => <Topic key={n} n={n} onOpen={() => setOpen(n)} />)}
-      {open >= 0 && <Reader n={open} pages={PAGES[SECTIONS[open][0]]} onClose={() => setOpen(-1)} onTopic={setOpen} />}
+      <p className="about-lead">Everything about Ledger, a topic at a time. Choose one to read it, or search the guide for what you're after. <button className="link" data-tour="tour-again" onClick={() => dispatchEvent(new Event('ledger-tour'))}>Take the tour</button> to be shown round the app instead.</p>
+      <GuideSearch pages={PAGES} q={q} setQ={setQ} onOpen={(n, page) => { setStart(page); setOpen(n); }} />
+      {!q.trim() && SECTIONS.map((_, n) => <Topic key={n} n={n} onOpen={() => { setStart(0); setOpen(n); }} />)}
+      {open >= 0 && <Reader n={open} pages={PAGES[SECTIONS[open][0]]} start={start} onClose={() => setOpen(-1)} onTopic={(n) => { setStart(0); setOpen(n); }} />}
     </div>
   );
 }

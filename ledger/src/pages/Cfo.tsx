@@ -15,6 +15,8 @@ const IDEAS = [
   'Why did my forecast change?',
   'What have we spent on groceries and eating out this month?',
   'Which bills are due in the next two weeks?',
+  // About the app itself: the CFO is given a map of Ledger (server/howto.js).
+  'What can Ledger do that I might not have found yet?',
 ];
 // One more for a household with a side gig.
 const gigIdea = (name: string) => `How much have I set aside for ${name} taxes, and how much should it be?`;
@@ -180,7 +182,7 @@ function FileCard({ file }: { file: File }) {
             <span className="cfo-file-end">
               <b className={`num ${r.direction === 'in' ? 'good' : ''}`}>{r.direction === 'in' ? '+' : '-'}{cents(Number(r.amount))}</b>
               <select aria-label={`Category for ${r.merchant}`} value={r.category_id} onChange={(e) => edit(r.key, { category_id: e.target.value })}>
-                {(cats ?? []).filter((c) => (r.direction === 'in' ? c.kind !== 'expense' || String(c.id) === r.category_id : c.kind === 'expense') || String(c.id) === r.category_id).map((c) => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
+                {(cats ?? []).filter((c) => (r.direction === 'in' ? c.kind !== 'expense' || String(c.id) === r.category_id : c.kind === 'expense' || c.kind === 'aside') || String(c.id) === r.category_id).filter((c) => !c.hidden || String(c.id) === r.category_id).map((c) => <option key={c.id} value={c.id}>{c.icon} {c.name}{c.kind === 'aside' ? ' (not counted)' : ''}</option>)}
               </select>
             </span>
           </label>
@@ -260,8 +262,8 @@ export default function Cfo() {
       {turns.length === 0 ? (
         <section className="card cfo-intro">
           <CfoOwl size={128} />
-          <h2>Ask about your money</h2>
-          {ai.plain ? <p className="sub">Your {ai.claude ? 'Claude' : 'Chief'} Financial Officer answers from this month's totals, your accounts, bills, debts and savings goals, using the AI set up in your Home Assistant. That is the basic CFO: it can't dig through single transactions, look up tax rules, read a screenshot or suggest changes. Those need an Anthropic key of your own, under <a href="#connections" onClick={jump(GO.ai)}>Settings, "AI recap and logos"</a>. It explains your figures; it doesn't give financial or tax advice.</p> : <p className="sub">Your Claude Financial Officer looks through your accounts, bills, budgets and taxes to answer. It can look things up, read a bank screenshot or export file you hand it with the paperclip, and suggest a few changes (filing a transaction, a new category, a budget, a bill's name) that only happen when you tap Confirm. It is an AI and explains your figures; it doesn't give tax or investment advice.</p>}
+          <h2>Ask about your money, or about Ledger</h2>
+          {ai.plain ? <p className="sub">Your {ai.claude ? 'Claude' : 'Chief'} Financial Officer answers from this month's totals, your accounts, bills, debts and savings goals, using the AI set up in your Home Assistant. It also knows its way round Ledger, so you can ask how or where to do something. That is the basic CFO: it can't dig through single transactions, look up tax rules, read a screenshot or suggest changes. Those need an Anthropic key of your own, under <a href="#connections" onClick={jump(GO.ai)}>Settings, "AI recap and logos"</a>. It explains your figures; it doesn't give financial or tax advice.</p> : <p className="sub">Your Claude Financial Officer looks through your accounts, bills, budgets and taxes to answer. It also knows its way round Ledger: ask how to do something, where a setting is, or whether Ledger can do a thing, and it names the page and the button. It can look things up, read a bank screenshot or export file you hand it with the paperclip, and suggest a few changes (filing a transaction, a new category, a budget, a bill's name) that only happen when you tap Confirm. It is an AI and explains your figures; it doesn't give tax or investment advice.</p>}
           <div className="cfo-ideas">
             {[...(ai.plain ? IDEAS.filter((q) => !/forecast change/.test(q)) : IDEAS), ...(gig.on && !ai.plain ? [gigIdea(gig.name)] : [])].map((s) => <button key={s} type="button" onClick={() => ask(s)}>{s}</button>)}
             {!ai.plain && <label htmlFor="cfo-file" className="cfo-idea-file" role="button" tabIndex={0}>📎 Catch Ledger up with my bank: here's a screenshot or file</label>}

@@ -70,9 +70,12 @@ connection or import replaces it. Your data is kept in the Docker volume `ledger
 On your own computer Ledger only works while the computer is on and awake: bank syncs, the summary
 email and alerts wait until it is.
 
+### Updating a Docker install
+
 Ledger looks at this page once a day and says on its dashboard when a newer version is out (nothing about
-you is sent, and Settings, "Updates" switches it off). To update to a newer version, run these two lines one
-after the other:
+you is sent, and Settings, "Updates" switches it off). Settings, "Updates" also shows the version you are
+running and these same steps at any time. To update, run these two lines one after the other. Your data is
+kept: it lives in the `ledger-data` volume, not in the container.
 
 ```bash
 docker rm -f ledger

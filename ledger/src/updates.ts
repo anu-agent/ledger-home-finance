@@ -13,14 +13,27 @@
 // device remembers what it has seen.
 export type NewsGo = { page?: string; fold?: string; at?: string; open?: 'cfo' };
 export const JUST_ADDED: [title: string, text: string, more?: { date: string; go?: NewsGo }][] = [
+  ['Your own order and groups', 'On the Budgets page, move categories up and down, put them in groups of your own, merge two together or hide one you no longer use. Accounts and savings goals can be reordered too.', { date: '2026-11-26', go: { page: 'budgets', at: '[data-go="cat-organise"], [data-go="cat-group"]' } }],
   ['Leave an account out of the budget', 'For "fun money" accounts, a child\'s account, or anything you want to see but not count. On the Accounts page, choose "Leave out of the budget" on an account: its balance still shows, and its spending stops counting toward your budgets and totals.', { date: '2026-11-24', go: { page: 'accounts', at: '[data-go="off-budget"], [data-go~="account-row"] .more-btn' } }],
   ['Hand your CFO a bank screenshot', 'The paperclip in Ask your CFO takes a screenshot of your bank\'s recent activity, or its CSV export, and adds what Ledger is missing. You tick the rows first, and nothing is counted twice when the bank catches up.', { date: '2026-11-24', go: { page: 'dashboard', open: 'cfo', at: '.cfo-attach, .cfo-idea-file' } }],
   ['Allowances', 'A notebook of what you hold for each child: a weekly allowance that adds itself, money for chores, and what they spend, with spend, save and give jars if you like. Switch it on in Settings, "Allowances".', { date: '2026-11-24', go: { page: 'connections', fold: 'allowance', at: '[data-go="allowance-switch"]' } }],
   ['Give every dollar a job', 'A second way to budget, at the foot of the Budgets page under "Choose your budgeting method". Pay that arrives waits to be assigned, and you hand it out to categories until none is left. Switch it off any time.', { date: '2026-11-23', go: { page: 'budgets', fold: 'budget-zero', at: '[data-go="zero-switch"]' } }],
-  ['Upload debt statements', 'On the Debt page, "Upload debt" reads one statement or several at once: balance, payment, interest and rate, with a warning when a promotional rate is ending. Nothing is saved until you say so.', { date: '2026-11-23', go: { page: 'debt', at: '[data-news="upload-debt"]' } }],
 ];
 
 export const UPDATES: [date: string, items: string[]][] = [
+  ['2026-11-26', [
+    'Categories can be put in your own order: on the Budgets page, the arrows beside a category (or "⋯" on a phone) move it up or down, and every category menu follows.',
+    'Organise, beside each category on the Budgets page, moves it between flexible spending and fixed bills or into a group of your own, merges it into another category (its history goes with it), or hides one you no longer use.',
+    'Plan next month before it starts: "Plan next month\'s budget" at the top of the Budgets page opens the coming month, and what you type there begins on the 1st without changing this month.',
+    'A category can be left out of the budget (Organise, on the Budgets page): for work expenses you are paid back for and the like. What is filed there counts in no budget or total, and the page shows what went out and what came back.',
+    'Accounts can be moved up and down within their kind on the Accounts page.',
+    'The About guide can be searched: type what you are after ("plan next month", "refund", "backup") and it lists the pages of the guide that cover it. No AI is needed.',
+    'Your CFO now knows its way round the app: ask it how or where to do something ("can I plan next month\'s budget?", "how do I leave a card out of my budget?") and it names the page and the button. Its opening screen has an example to try.',
+    'Settings, "Updates" now shows how to update at any time, not only when a newer version is out, and About explains updating for each kind of install.',
+    'Settings has a search box: type your own word for something ("bank", "dark", "backup") and it shows where that is changed. Under it, the sections you open most stay one tap away.',
+    'Savings goals can be moved up and down. Goals that share an account are filled from the top, so this also decides which is filled first.',
+    'On a phone, "Choose what shows here" at the foot of the dashboard can now put the cards in your own order.',
+  ]],
   ['2026-11-25', [
     'When you add a payday you can now say what it is: a paycheck, Social Security or other benefits, a pension, or other regular income. Ledger only ever asks for a pay stub for a job, and tells you where benefits and pensions go if they need to be in your tax estimate.',
     'You can choose your currency in Settings, "Currency": pounds, euros, Canadian or Australian dollars and eighteen more. Every amount is then written with its symbol. It only changes how amounts are written; nothing is converted.',
